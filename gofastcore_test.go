@@ -16,6 +16,7 @@ import (
 
 func sample() *Document {
 	d := New("pdf")
+	d.HiddenChecked = HiddenChars
 	d.Source.Name = "report.pdf"
 	d.Metadata = Metadata{
 		Title:   "Q3 Report",
@@ -47,6 +48,7 @@ func sample() *Document {
 	}
 	d.Parts[1].Warn(SeverityWarning, WarnImageUnsupportedEncoding, "JBIG2 not decoded")
 	child := New("xlsx")
+	child.HiddenChecked = HiddenChars
 	child.Source.Name = "data.xlsx"
 	child.Parts = []Part{{Kind: PartSheet, Number: 1, Name: "Sheet1", Blocks: []Block{
 		{Kind: KindTable, Loc: Location{Range: "A1:B2"}, Table: &Table{
@@ -193,6 +195,7 @@ func TestRenderOptions(t *testing.T) {
 
 func TestEmptyDocumentRendersEmpty(t *testing.T) {
 	d := New("txt")
+	d.HiddenChecked = HiddenChars
 	d.Parts = []Part{{Kind: PartBody, Number: 1}}
 	if d.Markdown() != "" || d.Text() != "" {
 		t.Errorf("empty document rendered %q / %q", d.Markdown(), d.Text())
@@ -255,6 +258,7 @@ func TestMarkdownEscapesLeadingMarkers(t *testing.T) {
 
 func TestContinuedBlocksAreJoined(t *testing.T) {
 	d := New("pdf")
+	d.HiddenChecked = HiddenChars
 	d.Parts = []Part{
 		{Kind: PartPage, Number: 1, Blocks: []Block{
 			{Kind: KindParagraph, Text: "The sentence starts here and"},
@@ -372,6 +376,7 @@ func TestValidateRejects(t *testing.T) {
 
 func TestEmptyListsMarshalAsArrays(t *testing.T) {
 	d := New("pdf")
+	d.HiddenChecked = HiddenChars
 	d.Parts = []Part{
 		{Kind: PartPage, Number: 1}, // a failed page: no blocks
 		{Kind: PartPage, Number: 2, Blocks: []Block{{Kind: KindTable, Table: &Table{}}}},
@@ -398,6 +403,7 @@ func TestEmptyListsMarshalAsArrays(t *testing.T) {
 func TestValidateTextConventions(t *testing.T) {
 	para := func(text string) *Document {
 		d := New("pdf")
+		d.HiddenChecked = HiddenChars
 		d.Parts = []Part{{Kind: PartPage, Number: 1, Blocks: []Block{{Kind: KindParagraph, Text: text}}}}
 		return d
 	}
@@ -523,12 +529,14 @@ func TestExtractChild(t *testing.T) {
 				t.Errorf("child options not derived correctly: %+v", o)
 			}
 			d := New("txt")
+			d.HiddenChecked = HiddenChars
 			d.Parts = []Part{{Kind: PartBody, Number: 1}}
 			d.Children = append(d.Children, o.ExtractChild(ctx, "inner-of-"+name, "", r, size))
 			return d, nil
 		},
 	}
 	root := New("eml")
+	root.HiddenChecked = HiddenChars
 	root.Parts = []Part{{Kind: PartMessage, Number: 1}}
 	root.Children = append(root.Children, opts.ExtractChild(ctx, "a.txt", "text/plain", data, 5))
 	if !reflect.DeepEqual(depths, []int{1, 2}) {

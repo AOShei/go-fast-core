@@ -28,6 +28,7 @@ Document
 ├── Source      format, name, MIME, size
 ├── Metadata    title, authors, dates, language, extra
 ├── Outline[]   the source's own table of contents (PDF bookmarks, epub nav)
+├── HiddenChecked  which hidden-text checks ran
 ├── Parts[]     the format's natural unit: page, slide, sheet, chapter, message, body
 │   ├── Blocks[]    content in reading order
 │   └── Warnings[]  what went wrong in this part
@@ -81,7 +82,7 @@ Every block may also carry:
 6. A block that runs across a part boundary is either assigned to the part where it starts or split, with `Continued` set on the later piece.
 7. `Table` is set exactly on `table` blocks, `Image` exactly on `image` blocks.
 8. `Extract` is safe to call from many goroutines and honors context cancellation.
-9. Hidden text is extracted and flagged, never dropped. Every extractor calls `part.MarkHidden()` on each finished part.
+9. Hidden text is extracted and flagged, never dropped. Every extractor calls `part.MarkHidden()` on each finished part and records in `Document.HiddenChecked` which reasons it fully checked.
 10. Output is deterministic: the same input and options give the same document whatever `Options.Workers` is, including where a limit truncates it.
 
 `doc.Validate()` checks everything mechanical in rules 1, 4, 5 and 7, plus spans, tables, merges, warnings and enum values. Run it on every test fixture and fuzz output:
@@ -184,7 +185,7 @@ The go-fast libraries do not decide which it is. They **extract hidden text like
 | Reason | Meaning |
 |---|---|
 | `invisible` | The source marks the text as not displayed: PDF invisible render mode or a layer that is off; Word hidden-text formatting; a hidden slide, sheet, row or column; HTML `display:none`, `visibility:hidden`, `hidden` |
-| `text_layer` | Invisible text lying over an image, which is how a scanned page's searchable text is stored. Used instead of `invisible`. Nothing verifies that it matches the image |
+| `text_layer` | Unpainted text lying within an image that covers at least half of its page (`HiddenTextLayerCoverage`), which is how a scanned page's searchable text is stored. Nothing verifies that it matches the image. It stands alone: see below |
 | `tiny` | Displayed smaller than 2 points (`HiddenTinySize`) |
 | `low_contrast` | Text color indistinguishable from what is behind it: WCAG contrast ratio under 1.2 (`HiddenContrastRatio`, `LowContrast`) |
 | `off_page` | Positioned outside the visible area of the page, slide or viewport |
@@ -194,6 +195,8 @@ The go-fast libraries do not decide which it is. They **extract hidden text like
 | `invisible_chars` | Contains characters that display as nothing yet can carry a payload (`InvisibleChars`) |
 
 The thresholds live in core so that a reason means the same in every format.
+
+A block flagged `text_layer` carries none of the reasons that describe how painted text fails to be seen (`invisible`, `tiny`, `low_contrast`, `clipped`, `occluded`, `transparent`), whichever way the file hides it, including text drawn first and covered by the page image. That keeps its warning at `info` and makes "exclude everything hidden except text layers" work. Unpainted text over a smaller image is `invisible`. `Validate` enforces the rule.
 
 `invisible_chars` covers Unicode tag characters (which mirror ASCII invisibly and which language models can read), the bidirectional overrides U+202D and U+202E, runs of four or more zero-width characters, and runs of two or more variation selectors. Single zero-width characters and well-formed emoji sequences are ordinary text and are not flagged. Core runs this scan for every format, plain text included.
 
@@ -211,6 +214,21 @@ The thresholds live in core so that a reason means the same in every format.
 ```
 
 A reason added by a newer extractor decodes as `unknown` and is kept, so hidden text never looks visible to an older consumer.
+
+### What was checked
+
+No library can check every reason: plain text has no colors, HTML cannot know what covers what, and PDF's contrast check needs `Options.DeepHidden`. So that the absence of a flag can be audited, every document records which checks ran:
+
+```json
+{"schema_version": "0.1", "source": {"format": "pdf"},
+ "hidden_checked": "invisible+text_layer+tiny+off_page+transparent+invisible_chars", ...}
+```
+
+- A reason **listed** in `Document.HiddenChecked` was checked completely, as far as that extractor is able (its documentation states the limits). A block without that flag was looked at and nothing was found.
+- A reason **not listed** was not checked, or only in part. It may still appear on a block where a cheaper check happened to find it, but its absence says nothing.
+- `invisible_chars` is always listed. `Validate` requires it.
+
+With this, "no hidden text was found" and "hidden text was not looked for" are different, machine-readable answers.
 
 ### Using it
 
@@ -242,8 +260,9 @@ Exclusion cuts exactly the flagged ranges, so smuggled invisible characters are 
 1. Set the reasons only your format can know, on the block, span, table region or part.
 2. Never merge hidden text into a visible block without marking the range.
 3. Call `part.MarkHidden()` once per finished part. It runs the invisible-character scan, copies `Part.Hidden` to the blocks and adds the `text.hidden` warning. `Validate` fails if it was skipped.
-4. Cheap checks always run. Checks that need extra work (knowing what is drawn behind or over the text) run when `Options.DeepHidden` is set. Document which is which.
-5. Metadata strings cannot carry a block flag. If `InvisibleChars` finds something in one, add a document-level `text.hidden` warning.
+4. Set `doc.HiddenChecked` to the reasons you checked completely in this run, always including `HiddenChars`. List a reason only if its full check ran: one that depends on `Options.DeepHidden` is listed only when that option was set and the check exists.
+5. Cheap checks always run. Checks that need extra work (knowing what is drawn behind or over the text) run when `Options.DeepHidden` is set. Document which is which.
+6. Metadata strings cannot carry a block flag. If `InvisibleChars` finds something in one, add a document-level `text.hidden` warning.
 
 ## Extractor interface
 

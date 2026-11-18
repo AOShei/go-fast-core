@@ -132,6 +132,12 @@ func (v *validator) document(d *Document, path string, top bool) {
 	}
 
 	v.warnings("warnings", d.Warnings)
+	if !d.HiddenChecked.Valid() {
+		v.bad("invalid hidden_checked %#x", uint16(d.HiddenChecked))
+	}
+	if len(d.Parts) > 0 && d.HiddenChecked&HiddenChars == 0 {
+		v.bad("hidden_checked does not list %s; set Document.HiddenChecked to the reasons that were fully checked", HiddenChars)
+	}
 
 	last := 0
 	for i := range d.Parts {
@@ -198,6 +204,9 @@ func (v *validator) block(b *Block, bp string) {
 	v.textMap(bp+".attrs", b.Attrs)
 	if !b.Hidden.Valid() {
 		v.bad("%s: invalid hidden reasons %#x", bp, uint16(b.Hidden))
+	}
+	if b.Hidden&HiddenTextLayer != 0 && b.Hidden&hiddenPaint != 0 {
+		v.bad("%s: %s is combined with %s; a text layer carries no paint-related reason", bp, HiddenTextLayer, b.Hidden&hiddenPaint)
 	}
 	if b.Hidden&HiddenChars == 0 && InvisibleChars(b.Text) != nil {
 		v.bad("%s.text contains invisible characters that are not flagged; call Part.MarkHidden", bp)

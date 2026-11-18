@@ -34,10 +34,18 @@ const (
 	// format that blanks the value; HTML display:none, visibility:hidden
 	// or the hidden attribute.
 	HiddenInvisible Hidden = 1 << iota
-	// HiddenTextLayer: the text is invisible and lies over an image, which
-	// is how the searchable text of a scanned page is stored. It is used
-	// instead of HiddenInvisible, not with it. Nothing verifies that the
+	// HiddenTextLayer: the text is not painted and lies within an image
+	// that covers at least HiddenTextLayerCoverage of its page, which is
+	// how the searchable text of a scanned page is stored. Unpainted text
+	// over a smaller image is HiddenInvisible. Nothing verifies that the
 	// text matches what the image shows.
+	//
+	// It stands alone: a block flagged as a text layer carries none of the
+	// reasons that describe how painted text fails to be seen (invisible,
+	// tiny, low contrast, clipped, occluded, transparent), whichever way
+	// the file hides it, including text drawn first and covered by the
+	// page image. That keeps its warning at info and lets a caller exclude
+	// everything hidden except text layers.
 	HiddenTextLayer
 	// HiddenTiny: the text is displayed smaller than HiddenTinySize.
 	HiddenTiny
@@ -121,8 +129,17 @@ type HiddenCells struct {
 	Hidden  Hidden `json:"hidden"`
 }
 
+// hiddenPaint is the set of reasons a text layer is never combined with.
+const hiddenPaint = HiddenInvisible | HiddenTiny | HiddenLowContrast | HiddenClipped | HiddenOccluded | HiddenTransparent
+
 // Shared thresholds, so that a reason means the same in every format.
 const (
+	// HiddenTextLayerCoverage is the share of its page an image must cover
+	// for unpainted text over it to be HiddenTextLayer. A real text layer
+	// sits over a page-sized scan; the bound stops text hidden over a logo
+	// from getting the milder label.
+	HiddenTextLayerCoverage = 0.5
+
 	// HiddenTinySize is the displayed text size, in points, below which
 	// text is HiddenTiny. Printed text stops being legible well above it.
 	HiddenTinySize = 2.0

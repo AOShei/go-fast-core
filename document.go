@@ -39,7 +39,8 @@
 //   - Partial extraction returns a Document with warnings, not an error.
 //     Errors are for input that yields nothing usable.
 //   - Hidden text is extracted and flagged, never dropped; see Hidden.
-//     Every extractor calls Part.MarkHidden on each finished part.
+//     Every extractor calls Part.MarkHidden on each finished part and
+//     records in Document.HiddenChecked which reasons it fully checked.
 //   - Output is deterministic: the same input and options give the same
 //     Document whatever Options.Workers is, including where a limit
 //     truncates it.
@@ -85,8 +86,17 @@ type Document struct {
 	Source        Source        `json:"source"`
 	Metadata      Metadata      `json:"metadata,omitzero"`
 	Outline       []OutlineItem `json:"outline,omitempty"`
-	Parts         []Part        `json:"parts"`
-	Children      []*Document   `json:"children,omitempty"`
+	// HiddenChecked is the audit record for hidden text: the reasons for
+	// which this extraction ran its complete check. For a reason listed
+	// here, a block without that flag was looked at and nothing was
+	// found, as far as this extractor is able to tell (its documentation
+	// states the limits). A reason not listed was not checked, or only in
+	// part: it may still appear on a block where a cheaper check happened
+	// to find it, but its absence says nothing. HiddenChars is always
+	// listed, because Part.MarkHidden is mandatory.
+	HiddenChecked Hidden      `json:"hidden_checked,omitempty"`
+	Parts         []Part      `json:"parts"`
+	Children      []*Document `json:"children,omitempty"`
 	// Warnings holds problems that concern the document as a whole.
 	// Problems local to a part are in Part.Warnings.
 	Warnings []Warning `json:"warnings,omitempty"`
