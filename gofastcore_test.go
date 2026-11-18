@@ -370,6 +370,101 @@ func TestValidateRejects(t *testing.T) {
 	}
 }
 
+func TestEmptyListsMarshalAsArrays(t *testing.T) {
+	d := New("pdf")
+	d.Parts = []Part{
+		{Kind: PartPage, Number: 1}, // a failed page: no blocks
+		{Kind: PartPage, Number: 2, Blocks: []Block{{Kind: KindTable, Table: &Table{}}}},
+	}
+	d.Children = []*Document{(*Options)(nil).ExtractChild(context.Background(), "a.bin", "", nil, 0)}
+	data, err := json.Marshal(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "null") {
+		t.Errorf("JSON contains null: %s", data)
+	}
+	for _, s := range []string{`"blocks":[]`, `"parts":[]`, `"rows":[]`} {
+		if !strings.Contains(string(data), s) {
+			t.Errorf("JSON lacks %s: %s", s, data)
+		}
+	}
+	// Values marshal the same way as pointers.
+	if v, _ := json.Marshal(Part{Kind: PartPage, Number: 1}); !strings.Contains(string(v), `"blocks":[]`) {
+		t.Errorf("Part value marshaled as %s", v)
+	}
+}
+
+func TestValidateTextConventions(t *testing.T) {
+	para := func(text string) *Document {
+		d := New("pdf")
+		d.Parts = []Part{{Kind: PartPage, Number: 1, Blocks: []Block{{Kind: KindParagraph, Text: text}}}}
+		return d
+	}
+	for name, text := range map[string]string{
+		"empty":            "",
+		"leading space":    " x",
+		"trailing space":   "x ",
+		"trailing newline": "x\n",
+		"only whitespace":  "  ",
+		"nbsp at end":      "x\u00a0",
+		"ligature":         "of\ufb01ce",
+		"NUL":              "a\x00b",
+		"form feed":        "a\fb",
+		"carriage return":  "a\r\nb",
+		"C1 control":       "a\u0085b",
+	} {
+		if para(text).Validate() == nil {
+			t.Errorf("%s: Validate accepted paragraph text %q", name, text)
+		}
+	}
+	for name, text := range map[string]string{
+		"hard break": "line one\nline two",
+		"inner tab":  "Name:\tValue",
+		"non-ASCII":  "naïve café",
+	} {
+		if err := para(text).Validate(); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+
+	// Code is verbatim: indentation, trailing newline and ligature
+	// characters are allowed. Control characters and emptiness are not.
+	code := func(text string) *Document {
+		d := para("x")
+		d.Parts[0].Blocks[0] = Block{Kind: KindCode, Text: text}
+		return d
+	}
+	if err := code("\tif x {\n\t\ty := \"\ufb01\"\n\t}\n").Validate(); err != nil {
+		t.Errorf("verbatim code rejected: %v", err)
+	}
+	if code("").Validate() == nil || code("a\x00").Validate() == nil {
+		t.Error("empty code or code with NUL accepted")
+	}
+
+	// Images may have no alt text; cells may be empty or padded, but not
+	// carry control characters or ligatures.
+	d := para("x")
+	d.Parts[0].Blocks = []Block{
+		{Kind: KindImage, Image: &Image{ID: "obj-1"}},
+		{Kind: KindTable, Table: &Table{Rows: [][]string{{"", " padded "}}}},
+	}
+	if err := d.Validate(); err != nil {
+		t.Errorf("alt-less image or padded cell rejected: %v", err)
+	}
+	d.Parts[0].Blocks[1].Table.Rows[0][0] = "\ufb02at"
+	if d.Validate() == nil {
+		t.Error("ligature in a cell accepted")
+	}
+
+	// Control characters are rejected in every string, not only in blocks.
+	d = para("x")
+	d.Metadata.Title = "Report\x00"
+	if d.Validate() == nil {
+		t.Error("NUL in metadata accepted")
+	}
+}
+
 func TestValidateAcceptsSpanAtRuneBoundary(t *testing.T) {
 	d := sample()
 	d.Parts[0].Blocks[2].Spans[0] = Span{Start: 22, End: 25, Style: StyleBold} // "ré"
@@ -389,6 +484,12 @@ func TestPartRangeAndLimits(t *testing.T) {
 	}
 	if open := (PartRange{First: 5}); open.Contains(4) || !open.Contains(1000) {
 		t.Error("open-ended PartRange is wrong")
+	}
+	// An inverted range contains nothing; extractors report ErrNoPartsSelected.
+	for n := range 10 {
+		if (PartRange{First: 5, Last: 3}).Contains(n) {
+			t.Errorf("inverted PartRange contains %d", n)
+		}
 	}
 	if ResolveLimit(0, 7) != 7 || ResolveLimit(3, 7) != 3 || ResolveLimit(-1, 7) != math.MaxInt64 {
 		t.Error("ResolveLimit is wrong")
@@ -447,18 +548,33 @@ func TestExtractChild(t *testing.T) {
 		t.Errorf("tree with stub children should be valid: %v", err)
 	}
 
-	// A failing child extractor: listed with the reason.
-	failing := &Options{Child: func(context.Context, string, string, io.ReaderAt, int64, *Options) (*Document, error) {
-		return nil, fmt.Errorf("docx: %w", ErrMalformed)
-	}}
-	d := failing.ExtractChild(ctx, "bad.docx", "", data, 5)
-	if w := d.Warnings[0]; w.Code != WarnChildFailed || w.Severity != SeverityError || !strings.Contains(w.Message, "malformed") {
-		t.Errorf("failed child stub is wrong: %+v", w)
+	// A failing child extractor: listed, with a code that says why.
+	for _, c := range []struct {
+		err  error
+		code string
+	}{
+		{ErrMalformed, WarnChildFailed},
+		{errors.New("disk on fire"), WarnChildFailed},
+		{ErrUnsupported, WarnChildUnsupported},
+		{ErrPasswordRequired, WarnChildEncrypted},
+		{ErrWrongPassword, WarnChildEncrypted},
+	} {
+		failing := &Options{Child: func(context.Context, string, string, io.ReaderAt, int64, *Options) (*Document, error) {
+			return nil, fmt.Errorf("docx: %w", c.err)
+		}}
+		d := failing.ExtractChild(ctx, "bad.docx", "", data, 5)
+		w := d.Warnings[0]
+		if len(d.Parts) != 0 || w.Code != c.code || !strings.Contains(w.Message, c.err.Error()) {
+			t.Errorf("error %v gave stub %+v, want code %s", c.err, w, c.code)
+		}
+		if err := d.Validate(); err == nil {
+			t.Error("a stub is only valid as a child, not as a top-level document")
+		}
 	}
 }
 
 func TestErrorsAreDistinct(t *testing.T) {
-	all := []error{ErrPasswordRequired, ErrWrongPassword, ErrUnsupported, ErrMalformed, ErrLimitExceeded}
+	all := []error{ErrPasswordRequired, ErrWrongPassword, ErrUnsupported, ErrMalformed, ErrLimitExceeded, ErrNoPartsSelected}
 	for i, a := range all {
 		wrapped := fmt.Errorf("pdf: %w", a)
 		for j, b := range all {

@@ -36,9 +36,9 @@ const (
 	// source and appears as U+FFFD or is absent.
 	WarnTextUnmappedGlyphs = "text.unmapped_glyphs"
 
-	// WarnImageUnsupportedEncoding: an image uses an encoding the
-	// extractor cannot read; its block is present without pixel
-	// dimensions or data.
+	// WarnImageUnsupportedEncoding: image data was requested
+	// (ImagesData) and an image uses an encoding the extractor cannot
+	// deliver; its block is present without data.
 	WarnImageUnsupportedEncoding = "image.unsupported_encoding"
 
 	// WarnInputRepaired: the input was structurally damaged and was read
@@ -55,7 +55,17 @@ const (
 	// extractor was supplied or the depth limit was reached.
 	WarnChildNotExtracted = "child.not_extracted"
 
+	// WarnChildUnsupported: no extractor handles the embedded document's
+	// format, or it uses a feature that is not implemented. It is listed
+	// in Children without content.
+	WarnChildUnsupported = "child.unsupported"
+
+	// WarnChildEncrypted: the embedded document is encrypted and was not
+	// opened, because no password was supplied or the one supplied does
+	// not open it. Severity error.
+	WarnChildEncrypted = "child.encrypted"
+
 	// WarnChildFailed: extraction of an embedded document was attempted
-	// and returned an error. Severity error.
+	// and failed for any other reason. Severity error.
 	WarnChildFailed = "child.failed"
 )

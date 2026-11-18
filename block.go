@@ -28,9 +28,12 @@ type Block struct {
 	Text  string `json:"text,omitempty"`
 
 	// Origin says whether the block's kind, level and boundaries are
-	// declared by the source or were inferred by the extractor. The zero
-	// value is OriginNative, so an extractor that infers structure must
-	// set OriginInferred explicitly on every such block.
+	// declared by the source or were inferred by the extractor. It does
+	// not cover the block's position in the reading order: a PDF image is
+	// native (the file declares it and its box) even though where it falls
+	// among the text is inferred. The zero value is OriginNative, so an
+	// extractor that infers structure must set OriginInferred explicitly
+	// on every such block.
 	Origin Origin `json:"origin,omitempty"`
 
 	// Continued marks a block that continues the last block of the same

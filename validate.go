@@ -3,11 +3,15 @@ package gofastcore
 import (
 	"errors"
 	"fmt"
+	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
 // Validate checks that the document obeys the model's structural contract
-// and returns every violation found, joined with errors.Join.
+// and the mechanical text conventions (valid UTF-8, no control characters,
+// no unexpanded ligatures, trimmed non-empty block text) and returns every
+// violation found, joined with errors.Join.
 //
 // It is a check on producers. It walks the whole document, so call it from
 // tests rather than on the hot path, and it rejects the Unknown enum
@@ -27,9 +31,35 @@ func (v *validator) bad(format string, args ...any) {
 	v.errs = append(v.errs, fmt.Errorf(v.path+": "+format, args...))
 }
 
-func (v *validator) text(where, s string) {
+// textProblem reports how s breaks the text conventions, or "" if it does
+// not. Every string must be valid UTF-8 without control characters; prose
+// additionally has its ligatures expanded, and trimmed prose has no
+// surrounding whitespace.
+func textProblem(s string, prose, trimmed bool) string {
 	if !utf8.ValidString(s) {
-		v.bad("%s is not valid UTF-8", where)
+		return "is not valid UTF-8"
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) && r != '\n' && r != '\t' {
+			return fmt.Sprintf("contains control character U+%04X", r)
+		}
+	}
+	if prose && strings.ContainsAny(s, "\uFB00\uFB01\uFB02\uFB03\uFB04\uFB05\uFB06") {
+		return "contains an unexpanded ligature (U+FB00 to U+FB06)"
+	}
+	if trimmed && s != "" {
+		first, _ := utf8.DecodeRuneInString(s)
+		last, _ := utf8.DecodeLastRuneInString(s)
+		if unicode.IsSpace(first) || unicode.IsSpace(last) {
+			return "has leading or trailing whitespace"
+		}
+	}
+	return ""
+}
+
+func (v *validator) text(where, s string) {
+	if p := textProblem(s, false, false); p != "" {
+		v.bad("%s %s", where, p)
 	}
 }
 
@@ -144,7 +174,13 @@ func (v *validator) block(b *Block, bp string) {
 	if !b.Origin.Valid() {
 		v.bad("%s: invalid origin %d", bp, b.Origin)
 	}
-	v.text(bp+".text", b.Text)
+	// Code is verbatim; everything else is trimmed prose.
+	if p := textProblem(b.Text, b.Kind != KindCode, b.Kind != KindCode); p != "" {
+		v.bad("%s.text %s", bp, p)
+	}
+	if b.Text == "" && b.Kind != KindTable && b.Kind != KindImage {
+		v.bad("%s: %s block has empty text", bp, b.Kind)
+	}
 	v.text(bp+".marker", b.Marker)
 	v.textMap(bp+".attrs", b.Attrs)
 
@@ -208,8 +244,8 @@ func (v *validator) table(t *Table, bp string) {
 			v.bad("%s: table row %d has %d cells, want %d", bp, r, len(row), cols)
 		}
 		for c, cell := range row {
-			if !utf8.ValidString(cell) {
-				v.bad("%s.table[%d][%d] is not valid UTF-8", bp, r, c)
+			if p := textProblem(cell, true, false); p != "" {
+				v.bad("%s.table[%d][%d] %s", bp, r, c, p)
 			}
 		}
 	}

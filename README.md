@@ -8,12 +8,13 @@ Every extractor (`go-fast-pdf`, and later ooxml, html, email, ...) returns the s
 import "github.com/AOShei/go-fast-core" // package gofastcore
 ```
 
-**Status: schema version 0.1, agreed with the PDF extractor's review on 2026-11-18.** Not yet tagged. It will be tagged v0.1.0 once `go-fast-pdf` has been ported to it; until then, link the modules with a `go.work` file.
+**Status: schema version 0.1, agreed with the PDF extractor over two review rounds on 2026-11-18.** Not yet tagged. It will be tagged v0.1.0 once `go-fast-pdf` has been ported to it.
 
 ## Series conventions
 
 - **Naming.** Every package carries the brand prefix: `gofastcore`, `gofastpdf`, `gofasthtml`. No package in the series shares a name with a standard library package, so callers never need an import alias.
 - **Layout.** A library's public API is in its module root. Implementation goes under `internal/`, the CLI under `cmd/`. No `pkg/` directory.
+- **Format-specific settings.** `Options` holds only what every format understands. Settings for one format (for PDF: memory mapping, a cache budget) are fields on that library's extractor value: `gofastpdf.Extractor{...}.Extract(...)`.
 - **Dependencies.** The standard library and other go-fast modules only. `go-fast-core` itself imports only the standard library. Any other dependency must be challenged.
 - **Layering.** The shared model is the common denominator across formats. An extractor may offer a richer native API beside it (for PDF: word and line boxes, font names and sizes, glyph positions). Those details stay out of core.
 - **No OCR.** The go-fast libraries extract what the file contains. They report what they found and leave the next step to the caller.
@@ -51,7 +52,7 @@ A block has a `Kind`, usually `Text`, and kind-specific fields:
 
 Every block may also carry:
 
-- `Origin`: `native` when the source declares the structure (a docx style, an HTML tag, a tagged-PDF element, a PDF outline entry), `inferred` when the extractor deduced it from geometry or fonts. Absent in JSON means `native`.
+- `Origin`: `native` when the source declares the block's kind, level and boundaries (a docx style, an HTML tag, a tagged-PDF element, a PDF outline entry), `inferred` when the extractor deduced them from geometry or fonts. Absent in JSON means `native`. It does not cover the block's position in the reading order: a PDF image is `native` even though where it falls among the text is inferred.
 - `Continued`: this block continues the last block of the same kind in the previous part, such as a paragraph split by a page break.
 - `Loc`: where it came from. `BBox` for paged formats, `Range` (A1 notation) for sheets, `Offset`/`Length` for plain-text formats. This is what lets a retrieval hit be cited.
 - `Spans`: optional inline bold/italic/link ranges over `Text`.
@@ -71,12 +72,13 @@ Every block may also carry:
 
 1. All strings are valid UTF-8 and follow the text conventions below.
 2. A block is at least a paragraph-sized unit, never a fragment of a line or word.
-3. Blocks are in reading order. Where the format does not declare order (PDF), order is the extractor's best inference and the blocks carry `OriginInferred`.
+3. Blocks are in reading order. Where the format does not declare order (PDF), order is the extractor's best inference.
 4. A top-level document has at least one part.
 5. `Part.Number` is the part's 1-based ordinal in the source. Numbers strictly increase but need not be contiguous: extracting pages 40–60 yields parts numbered 40 to 60.
 6. A block that runs across a part boundary is either assigned to the part where it starts or split, with `Continued` set on the later piece.
 7. `Table` is set exactly on `table` blocks, `Image` exactly on `image` blocks.
 8. `Extract` is safe to call from many goroutines and honors context cancellation.
+9. Output is deterministic: the same input and options give the same document whatever `Options.Workers` is, including where a limit truncates it.
 
 `doc.Validate()` checks everything mechanical in rules 1, 4, 5 and 7, plus spans, tables, merges, warnings and enum values. Run it on every test fixture and fuzz output:
 
@@ -88,11 +90,20 @@ if err := doc.Validate(); err != nil { t.Fatal(err) }
 
 ### Text conventions
 
-- Soft line breaks inside a paragraph are joined with a single space. A `\n` in `Text` means a hard break. Code blocks are verbatim.
-- End-of-line hyphenation is resolved only when the extractor is certain; otherwise the hyphen stays.
+- Text is in logical order, the order in which it is read and typed, also for right-to-left scripts. An extractor that cannot guarantee this for some input says so with a warning.
+- Soft line breaks inside a paragraph are joined with a single space. A `\n` in `Text` means a hard break.
+- End-of-line hyphenation is resolved only when the extractor is certain. Otherwise the hyphen stays and the lines are joined with no space: `inter-` + `national` gives `inter-national`, so a real compound such as `well-` + `known` comes out right.
 - Presentation-form ligatures (U+FB00 to U+FB06) are expanded to their letters.
-- Text has no leading or trailing whitespace.
+- No string contains a control character (NUL, form feed, carriage return, ...) other than `\n` and `\t`.
+- Block text is not empty and has no leading or trailing whitespace.
+- Code blocks are verbatim: the ligature and whitespace rules do not apply to them.
 - Unicode normalization form is not guaranteed (normalization is not in the standard library).
+
+`Validate` enforces the rules it can check mechanically: no control characters in any string, no unexpanded ligatures in block text or table cells, and trimmed non-empty block text.
+
+### JSON
+
+`parts`, `blocks` and `rows` are always arrays, `[]` when empty and never `null`, so a consumer can iterate them without a nil check on a failed page or an unextracted child.
 
 ### Coordinates
 
@@ -134,11 +145,13 @@ Shared codes (constants `Warn*`):
 | `part.no_text` | The part was parsed and contains no text and no images |
 | `part.image_only` | The part was parsed and contains no text, but does contain image content. Reported whatever `Options.Images` is set to |
 | `text.unmapped_glyphs` | Some text has no Unicode mapping in the source and appears as U+FFFD or is absent |
-| `image.unsupported_encoding` | An image uses an encoding the extractor cannot read |
+| `image.unsupported_encoding` | Image data was requested and an image uses an encoding the extractor cannot deliver; its block has no data |
 | `input.repaired` | The input was structurally damaged and was read by a recovery path |
 | `limit.exceeded` | A limit was reached during extraction; the output is truncated there |
 | `child.not_extracted` | An embedded document is listed but was not extracted |
-| `child.failed` | Extraction of an embedded document was attempted and failed |
+| `child.unsupported` | No extractor handles the embedded document's format, or it uses an unimplemented feature |
+| `child.encrypted` | The embedded document is encrypted and was not opened (no password, or the wrong one) |
+| `child.failed` | Extraction of an embedded document failed for any other reason |
 
 An extractor may add codes of its own under a format prefix, such as `pdf.xref_rebuilt`.
 
@@ -169,17 +182,17 @@ type Extractor interface {
 | `Workers` | Goroutines inside one document; 0 means all CPUs |
 | `Images` | `ImagesNone`, `ImagesMeta` (position and size), `ImagesData` (bytes too) |
 | `Spans` | Ask for inline formatting and links |
-| `Password` | Tried on encrypted input |
-| `Parts` | `PartRange{First, Last}`, inclusive part numbers; zero value means all |
+| `Password` | Tried on encrypted input, and passed down to embedded documents |
+| `Parts` | `PartRange{First, Last}`, inclusive part numbers; zero value means all; a range that selects nothing is `ErrNoPartsSelected` |
 | `Limits` | `MaxInputBytes`, `MaxDecodedBytes`, `MaxParts`, `MaxDepth`. Zero means the extractor's default; negative means no limit |
 | `Child` | Function that extracts embedded documents; see below |
 | `Name` | Recorded as `Source.Name` |
 
 ### Errors
 
-Extractors wrap these, so test with `errors.Is`: `ErrPasswordRequired`, `ErrWrongPassword`, `ErrUnsupported`, `ErrMalformed`, `ErrLimitExceeded`.
+Extractors wrap these, so test with `errors.Is`: `ErrPasswordRequired`, `ErrWrongPassword`, `ErrUnsupported`, `ErrMalformed`, `ErrLimitExceeded`, `ErrNoPartsSelected`.
 
-A limit checked before extraction starts (`MaxInputBytes`) is `ErrLimitExceeded`. A limit reached part-way truncates the document and adds a `limit.exceeded` warning with severity `error`.
+Only `MaxInputBytes` produces `ErrLimitExceeded`. Every other limit truncates the document and adds a `limit.exceeded` warning with severity `error`. `MaxParts` returns the first `MaxParts` parts of the requested range, also where the part count is known up front.
 
 ### Embedded documents
 
@@ -189,7 +202,7 @@ An email attachment may be a PDF; a PDF may embed a spreadsheet. Extractors do n
 doc.Children = append(doc.Children, opts.ExtractChild(ctx, name, mime, reader, size))
 ```
 
-`ExtractChild` always returns a document, so every embedded file is at least listed with its name and size. If no `Child` was supplied, the depth limit was reached, or the child extractor failed, the result has no parts and one warning (`child.not_extracted` or `child.failed`) saying which.
+`ExtractChild` always returns a document, so every embedded file is at least listed with its name and size. When the child was not extracted, the result has no parts and one warning whose code says why: `child.not_extracted` (no `Child` supplied, or depth limit reached), `child.unsupported`, `child.encrypted` or `child.failed`. The last three are chosen from the error the child extractor returned, so a dispatcher should return `ErrUnsupported` for formats it has no extractor for.
 
 ## Schema evolution
 
@@ -214,7 +227,7 @@ This is a clean break: no compatibility shim for the old `pkg/loader` API or JSO
 | Today (`go-fast-pdf/pkg/model`) | Shared model |
 |---|---|
 | `Document.Pages[]` | `Document.Parts[]` with `Kind: PartPage` |
-| `Page.PageNumber` | `Part.Number` (the real page number, also when a range is extracted) |
+| `Page.PageNumber` | `Part.Number` (the page's ordinal, also when a range is extracted); a page label such as `iv` goes in `Part.Name` |
 | `Page.Width`, `Height` | `Part.Width`, `Height`, as displayed (CropBox after rotation) |
 | `Page.Content` (one string) | `Part.Blocks[]`; `part.Markdown()` or `part.Text()` gives a string |
 | `Page.CharCount` | Dropped; derivable from the blocks |
@@ -225,12 +238,13 @@ This is a clean break: no compatibility shim for the old `pkg/loader` API or JSO
 | `Image.Type`, `ColorSpace` | `Block.Attrs["inline"]`, `Attrs["color_space"]` |
 | `Metadata.Title`, `Encrypted` | Same names |
 | `Metadata.Author` | `Metadata.Authors`, one entry, not split |
+| PDF `/Keywords` | `Metadata.Keywords`, one entry, not split |
 | `Metadata.Creator` | `Metadata.Application` |
 | `Metadata.Producer` | `Metadata.Extra["producer"]` |
 | PDF bookmarks (not extracted today) | `Document.Outline` |
 | `LoadPDF` / `LoadPDFConcurrent` | `gofastpdf.Extract(ctx, r, size, opts)` |
 
-The PDF library needs a baseline layout stage (lines, paragraphs, column order) before its first release under this model, because of contract rules 2 and 3. Headings, lists, tables and header/footer tagging can follow incrementally without a schema change; until then everything is `paragraph` with `OriginInferred`.
+The PDF library needs a baseline layout stage (lines, paragraphs, column order) before its first release under this model, because of contract rules 2 and 3. Headings, lists, tables and header/footer tagging can follow incrementally without a schema change; until then every text block is a `paragraph` with `OriginInferred`.
 
 ## Example output
 

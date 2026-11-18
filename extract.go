@@ -42,15 +42,21 @@ var (
 	ErrUnsupported = errors.New("gofastcore: unsupported input")
 	// ErrMalformed: the input is not a readable file of the expected format.
 	ErrMalformed = errors.New("gofastcore: malformed input")
-	// ErrLimitExceeded: the input exceeds a limit that is checked before
-	// extraction starts, such as Limits.MaxInputBytes. A limit reached
-	// part-way does not produce this error; it truncates the document and
-	// adds WarnLimitExceeded.
+	// ErrLimitExceeded: the input exceeds Limits.MaxInputBytes. Every
+	// other limit truncates the document and adds WarnLimitExceeded
+	// instead of failing.
 	ErrLimitExceeded = errors.New("gofastcore: limit exceeded")
+	// ErrNoPartsSelected: Options.Parts selects no part of the input,
+	// because it lies beyond the last part or First is greater than Last.
+	ErrNoPartsSelected = errors.New("gofastcore: part range selects no parts")
 )
 
 // Options are the settings common to all extractors. The zero value asks
 // for text and structure only, for the whole input, using all CPUs.
+//
+// Settings that only one format understands (for PDF: memory mapping, a
+// cache budget) do not belong here. They are fields on that library's
+// extractor value, e.g. gofastpdf.Extractor{...}.Extract(...).
 type Options struct {
 	// Workers bounds the goroutines used inside a single document
 	// (e.g. PDF pages). 0 means runtime.GOMAXPROCS(0). Pipelines that
@@ -63,11 +69,14 @@ type Options struct {
 	// Spans asks for inline formatting and links in Block.Spans.
 	Spans bool
 
-	// Password is tried on encrypted input.
+	// Password is tried on encrypted input. It is also passed down to
+	// embedded documents, which is what opens an encrypted attachment of
+	// an unencrypted email.
 	Password string
 
 	// Parts restricts extraction to a range of part numbers. The zero
-	// value extracts every part.
+	// value extracts every part. A range that selects nothing is
+	// ErrNoPartsSelected.
 	Parts PartRange
 
 	// Limits guards against hostile or oversized input.
@@ -132,7 +141,9 @@ type Limits struct {
 	// MaxDecodedBytes bounds the total bytes produced by decompression
 	// (zip members, PDF streams), the defense against decompression bombs.
 	MaxDecodedBytes int64
-	// MaxParts bounds the number of parts extracted.
+	// MaxParts bounds the number of parts extracted. When the input has
+	// more, the first MaxParts parts of the requested range are returned
+	// with WarnLimitExceeded, also where the count is known up front.
 	MaxParts int
 	// MaxDepth bounds how deeply embedded documents are followed. The
 	// default is DefaultMaxDepth.
@@ -161,9 +172,14 @@ func ResolveLimit(v, def int64) int64 {
 // embedded file is at least listed with its name and size.
 //
 // The returned document has no parts and a single warning when the child
-// was not extracted: WarnChildNotExtracted if no ChildFunc was supplied or
-// the depth limit was reached, WarnChildFailed if the ChildFunc returned
-// an error. ExtractChild may be called on a nil *Options.
+// was not extracted. The warning code says why:
+//
+//	WarnChildNotExtracted  no ChildFunc was supplied, or the depth limit was reached
+//	WarnChildUnsupported   the ChildFunc returned ErrUnsupported
+//	WarnChildEncrypted     the ChildFunc returned ErrPasswordRequired or ErrWrongPassword
+//	WarnChildFailed        the ChildFunc returned any other error
+//
+// ExtractChild may be called on a nil *Options.
 func (o *Options) ExtractChild(ctx context.Context, name, mime string, r io.ReaderAt, size int64) *Document {
 	stub := func(severity Severity, code, message string) *Document {
 		d := New("")
@@ -182,7 +198,13 @@ func (o *Options) ExtractChild(ctx context.Context, name, mime string, r io.Read
 	childOpts.Name = name
 	childOpts.Parts = PartRange{}
 	doc, err := o.Child(ctx, name, mime, r, size, &childOpts)
-	if err != nil {
+	switch {
+	case err == nil:
+	case errors.Is(err, ErrUnsupported):
+		return stub(SeverityWarning, WarnChildUnsupported, err.Error())
+	case errors.Is(err, ErrPasswordRequired), errors.Is(err, ErrWrongPassword):
+		return stub(SeverityError, WarnChildEncrypted, err.Error())
+	default:
 		return stub(SeverityError, WarnChildFailed, err.Error())
 	}
 	if doc == nil {

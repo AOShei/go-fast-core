@@ -27,8 +27,8 @@
 //   - A block is at least a paragraph-sized unit, never a fragment of a
 //     line or word.
 //   - Blocks appear in reading order. Where the format does not declare
-//     order (PDF), order is the extractor's best inference and the blocks
-//     carry OriginInferred.
+//     order (PDF), order is the extractor's best inference. Block.Origin
+//     does not cover order; it describes kind, level and boundaries only.
 //   - A top-level document has at least one part. Formats with no natural
 //     unit (docx, html, txt) use a single PartBody.
 //   - Part numbers are the 1-based ordinal of the part in the source and
@@ -38,16 +38,28 @@
 //     part where it starts or split, with Continued set on the later piece.
 //   - Partial extraction returns a Document with warnings, not an error.
 //     Errors are for input that yields nothing usable.
+//   - Output is deterministic: the same input and options give the same
+//     Document whatever Options.Workers is, including where a limit
+//     truncates it.
 //
 // # Text conventions
 //
+//   - Text is in logical order, the order in which it is read and typed,
+//     also for right-to-left scripts. An extractor that cannot guarantee
+//     this for some input says so with a warning.
 //   - Soft line breaks inside a paragraph are joined with a single space.
-//     A "\n" in Text means a hard break. Code blocks are verbatim.
+//     A "\n" in Text means a hard break.
 //   - End-of-line hyphenation is resolved only when the extractor is
-//     certain; otherwise the hyphen stays.
+//     certain. Otherwise the hyphen stays and the lines are joined with
+//     no space: "inter-" + "national" gives "inter-national", so that a
+//     real compound such as "well-" + "known" comes out right.
 //   - Presentation-form ligatures (U+FB00 to U+FB06) are expanded to
 //     their letters.
-//   - Text has no leading or trailing whitespace.
+//   - No string contains a control character (Unicode category Cc: NUL,
+//     form feed, carriage return, ...) other than "\n" and "\t".
+//   - Block text is not empty and has no leading or trailing whitespace.
+//   - Code blocks are verbatim: the ligature and whitespace rules do not
+//     apply to them.
 //   - Unicode normalization form is not guaranteed.
 //
 // Document.Validate checks the mechanical parts of this contract and is
@@ -104,8 +116,10 @@ type Metadata struct {
 	// Authors has one entry per author the source declares. A source with
 	// a single free-text author field (PDF) yields one entry, verbatim;
 	// extractors must not split a string on guesswork.
-	Authors  []string  `json:"authors,omitempty"`
-	Subject  string    `json:"subject,omitempty"`
+	Authors []string `json:"authors,omitempty"`
+	Subject string   `json:"subject,omitempty"`
+	// Keywords follows the same rule as Authors: a single free-text
+	// keywords field yields one entry, verbatim.
 	Keywords []string  `json:"keywords,omitempty"`
 	Language string    `json:"language,omitempty"` // BCP 47, e.g. "en", "pt-BR"
 	Created  time.Time `json:"created,omitzero"`
@@ -144,7 +158,9 @@ type Part struct {
 	Kind PartKind `json:"kind"`
 	// Number is the 1-based ordinal of this part in the source.
 	Number int `json:"number"`
-	// Name is the sheet name, slide title, chapter title, etc. Optional.
+	// Name is what people call the part: the sheet name, slide title,
+	// chapter title, or a PDF page label ("iv", "A-3") where it differs
+	// from Number. Optional.
 	Name string `json:"name,omitempty"`
 	// Width and Height give the part's coordinate space for Block.Loc.BBox,
 	// as the part is displayed. For PDF: the CropBox after /Rotate and
