@@ -83,7 +83,8 @@ Every block may also carry:
 7. `Table` is set exactly on `table` blocks, `Image` exactly on `image` blocks.
 8. `Extract` is safe to call from many goroutines and honors context cancellation.
 9. Hidden text is extracted and flagged, never dropped. Every extractor calls `part.MarkHidden()` on each finished part and records in `Document.HiddenChecked` which reasons it fully checked.
-10. Output is deterministic: the same input and options give the same document whatever `Options.Workers` is, including where a limit truncates it.
+10. `Document.Parts`, `Part.Blocks` and `Table.Rows` are never nil, so JSON has `[]` and never `null`. A table has at least one row and one column.
+11. Output is deterministic: the same input and options give the same document whatever `Options.Workers` is, including where a limit truncates it.
 
 `doc.Validate()` checks everything mechanical in rules 1, 4, 5 and 7, plus spans, tables, merges, warnings and enum values. Run it on every test fixture and fuzz output:
 
@@ -109,6 +110,8 @@ if err := doc.Validate(); err != nil { t.Fatal(err) }
 ### JSON
 
 `parts`, `blocks` and `rows` are always arrays, `[]` when empty and never `null`, so a consumer can iterate them without a nil check on a failed page or an unextracted child.
+
+The model has no custom JSON marshalers, which keeps encoding at the full speed of `encoding/json`. The guarantee comes from the lists never being nil: `New` creates an empty parts list, `part.MarkHidden()` makes an empty blocks list, and a table has at least one row and one column. `Validate` rejects a nil list.
 
 ### Coordinates
 
@@ -198,6 +201,8 @@ The thresholds live in core so that a reason means the same in every format.
 
 A block flagged `text_layer` carries none of the reasons that describe how painted text fails to be seen (`invisible`, `tiny`, `low_contrast`, `clipped`, `occluded`, `transparent`), whichever way the file hides it, including text drawn first and covered by the page image. That keeps its warning at `info` and makes "exclude everything hidden except text layers" work. Unpainted text over a smaller image is `invisible`. `Validate` enforces the rule.
 
+`invisible_chars` is not one of those reasons. A text layer that contains invisible characters is flagged `text_layer+invisible_chars`, and its warning is `warning`, not `info`: smuggled characters are worth reporting wherever they are.
+
 `invisible_chars` covers Unicode tag characters (which mirror ASCII invisibly and which language models can read), the bidirectional overrides U+202D and U+202E, runs of four or more zero-width characters, and runs of two or more variation selectors. Single zero-width characters and well-formed emoji sequences are ordinary text and are not flagged. Core runs this scan for every format, plain text included.
 
 ### Where the flag is
@@ -259,7 +264,7 @@ Exclusion cuts exactly the flagged ranges, so smuggled invisible characters are 
 
 1. Set the reasons only your format can know, on the block, span, table region or part.
 2. Never merge hidden text into a visible block without marking the range.
-3. Call `part.MarkHidden()` once per finished part. It runs the invisible-character scan, copies `Part.Hidden` to the blocks and adds the `text.hidden` warning. `Validate` fails if it was skipped.
+3. Call `part.MarkHidden()` once per finished part, including a failed or blank one. It runs the invisible-character scan, copies `Part.Hidden` to the blocks, adds the `text.hidden` warning and makes an empty blocks list non-nil. `Validate` fails if it was skipped.
 4. Set `doc.HiddenChecked` to the reasons you checked completely in this run, always including `HiddenChars`. List a reason only if its full check ran: one that depends on `Options.DeepHidden` is listed only when that option was set and the check exists.
 5. Cheap checks always run. Checks that need extra work (knowing what is drawn behind or over the text) run when `Options.DeepHidden` is set. Document which is which.
 6. Metadata strings cannot carry a block flag. If `InvisibleChars` finds something in one, add a document-level `text.hidden` warning.

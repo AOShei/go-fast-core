@@ -105,6 +105,9 @@ func (v *validator) document(d *Document, path string, top bool) {
 		v.bad("child has no parts and no warning explaining why")
 	}
 
+	if d.Parts == nil {
+		v.bad("parts is nil; use New, or an empty list, so that JSON has [] and not null")
+	}
 	v.text("source.format", d.Source.Format)
 	v.text("source.name", d.Source.Name)
 	v.text("source.mime", d.Source.MIME)
@@ -155,6 +158,9 @@ func (v *validator) document(d *Document, path string, top bool) {
 		}
 		v.text(pp+".name", p.Name)
 		v.warnings(pp+".warnings", p.Warnings)
+		if p.Blocks == nil {
+			v.bad("%s: blocks is nil; call Part.MarkHidden, so that JSON has [] and not null", pp)
+		}
 		if !p.Hidden.Valid() {
 			v.bad("%s: invalid hidden reasons %#x", pp, uint16(p.Hidden))
 		}
@@ -291,6 +297,9 @@ func (v *validator) table(t *Table, bp string) {
 	cols := 0
 	if len(t.Rows) > 0 {
 		cols = len(t.Rows[0])
+	}
+	if cols == 0 {
+		v.bad("%s: table has no cells; a table has at least one row and one column", bp)
 	}
 	for r, row := range t.Rows {
 		if len(row) != cols {

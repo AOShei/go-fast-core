@@ -41,6 +41,10 @@
 //   - Hidden text is extracted and flagged, never dropped; see Hidden.
 //     Every extractor calls Part.MarkHidden on each finished part and
 //     records in Document.HiddenChecked which reasons it fully checked.
+//   - Lists that consumers iterate are never nil: Document.Parts,
+//     Part.Blocks and Table.Rows. JSON then has [] where a list is empty,
+//     never null, at no encoding cost. New and Part.MarkHidden take care
+//     of the first two; a table has at least one row.
 //   - Output is deterministic: the same input and options give the same
 //     Document whatever Options.Workers is, including where a limit
 //     truncates it.
@@ -103,9 +107,10 @@ type Document struct {
 }
 
 // New returns an empty Document for the given format with the schema
-// version set.
+// version set. Its Parts list is empty but not nil, so that it is written
+// to JSON as [] and never as null.
 func New(format string) *Document {
-	return &Document{SchemaVersion: SchemaVersion, Source: Source{Format: format}}
+	return &Document{SchemaVersion: SchemaVersion, Source: Source{Format: format}, Parts: []Part{}}
 }
 
 // Source describes the input the document was extracted from.

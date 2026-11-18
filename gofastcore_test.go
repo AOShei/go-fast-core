@@ -196,7 +196,7 @@ func TestRenderOptions(t *testing.T) {
 func TestEmptyDocumentRendersEmpty(t *testing.T) {
 	d := New("txt")
 	d.HiddenChecked = HiddenChars
-	d.Parts = []Part{{Kind: PartBody, Number: 1}}
+	d.Parts = []Part{{Kind: PartBody, Number: 1, Blocks: []Block{}}}
 	if d.Markdown() != "" || d.Text() != "" {
 		t.Errorf("empty document rendered %q / %q", d.Markdown(), d.Text())
 	}
@@ -377,11 +377,13 @@ func TestValidateRejects(t *testing.T) {
 func TestEmptyListsMarshalAsArrays(t *testing.T) {
 	d := New("pdf")
 	d.HiddenChecked = HiddenChars
-	d.Parts = []Part{
-		{Kind: PartPage, Number: 1}, // a failed page: no blocks
-		{Kind: PartPage, Number: 2, Blocks: []Block{{Kind: KindTable, Table: &Table{}}}},
-	}
+	d.Parts = append(d.Parts, Part{Kind: PartPage, Number: 1}) // a failed page: no blocks
+	d.Parts[0].Warn(SeverityError, WarnPartFailed, "")
+	d.Parts[0].MarkHidden()
 	d.Children = []*Document{(*Options)(nil).ExtractChild(context.Background(), "a.bin", "", nil, 0)}
+	if err := d.Validate(); err != nil {
+		t.Fatal(err)
+	}
 	data, err := json.Marshal(d)
 	if err != nil {
 		t.Fatal(err)
@@ -389,14 +391,71 @@ func TestEmptyListsMarshalAsArrays(t *testing.T) {
 	if strings.Contains(string(data), "null") {
 		t.Errorf("JSON contains null: %s", data)
 	}
-	for _, s := range []string{`"blocks":[]`, `"parts":[]`, `"rows":[]`} {
+	for _, s := range []string{`"blocks":[]`, `"parts":[]`} {
 		if !strings.Contains(string(data), s) {
 			t.Errorf("JSON lacks %s: %s", s, data)
 		}
 	}
-	// Values marshal the same way as pointers.
-	if v, _ := json.Marshal(Part{Kind: PartPage, Number: 1}); !strings.Contains(string(v), `"blocks":[]`) {
-		t.Errorf("Part value marshaled as %s", v)
+	// Empty lists survive a round trip as empty lists.
+	got := new(Document)
+	if err := json.Unmarshal(data, got); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := json.Marshal(got); string(again) != string(data) {
+		t.Errorf("round trip changed the JSON:\n%s\n%s", data, again)
+	}
+	if empty, _ := json.Marshal(New("txt")); !strings.Contains(string(empty), `"parts":[]`) {
+		t.Errorf("New() marshals as %s", empty)
+	}
+
+	// The model has no custom marshalers, so a nil list would be written
+	// as null. Validate is what stops one from being produced.
+	nilBlocks := New("pdf")
+	nilBlocks.HiddenChecked = HiddenChars
+	nilBlocks.Parts = []Part{{Kind: PartPage, Number: 1}}
+	if nilBlocks.Validate() == nil {
+		t.Error("nil blocks accepted")
+	}
+	nilParts := &Document{SchemaVersion: SchemaVersion, Source: Source{Format: "pdf"}}
+	if err := nilParts.Validate(); err == nil || !strings.Contains(err.Error(), "parts is nil") {
+		t.Errorf("nil parts: %v", err)
+	}
+	for name, table := range map[string]*Table{"no rows": {}, "no columns": {Rows: [][]string{{}}}} {
+		e := New("pdf")
+		e.HiddenChecked = HiddenChars
+		e.Parts = []Part{{Kind: PartPage, Number: 1, Blocks: []Block{{Kind: KindTable, Table: table}}}}
+		if e.Validate() == nil {
+			t.Errorf("table with %s accepted", name)
+		}
+	}
+}
+
+func BenchmarkMarshal(b *testing.B) {
+	d := New("pdf")
+	d.HiddenChecked = HiddenChars
+	for p := 1; p <= 100; p++ {
+		part := Part{Kind: PartPage, Number: p, Width: 612, Height: 792}
+		for i := range 12 {
+			part.Blocks = append(part.Blocks, Block{
+				Kind: KindParagraph, Origin: OriginInferred,
+				Text: fmt.Sprintf("Paragraph %d on page %d. The quick brown fox jumps over the lazy dog, again and again, until the paragraph is a realistic length for body text.", i, p),
+				Loc:  Location{BBox: Rect{72, float64(72 + i*50), 540, float64(110 + i*50)}},
+			})
+		}
+		part.Blocks = append(part.Blocks, Block{Kind: KindTable, Origin: OriginInferred, Table: &Table{
+			HeaderRows: 1, Rows: [][]string{{"Region", "Q1", "Q2"}, {"EMEA", "1.2", "1.4"}},
+		}})
+		part.MarkHidden()
+		d.Parts = append(d.Parts, part)
+	}
+	out, err := json.Marshal(d)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.SetBytes(int64(len(out)))
+	b.ReportAllocs()
+	for b.Loop() {
+		json.Marshal(d)
 	}
 }
 
@@ -530,14 +589,14 @@ func TestExtractChild(t *testing.T) {
 			}
 			d := New("txt")
 			d.HiddenChecked = HiddenChars
-			d.Parts = []Part{{Kind: PartBody, Number: 1}}
+			d.Parts = []Part{{Kind: PartBody, Number: 1, Blocks: []Block{}}}
 			d.Children = append(d.Children, o.ExtractChild(ctx, "inner-of-"+name, "", r, size))
 			return d, nil
 		},
 	}
 	root := New("eml")
 	root.HiddenChecked = HiddenChars
-	root.Parts = []Part{{Kind: PartMessage, Number: 1}}
+	root.Parts = []Part{{Kind: PartMessage, Number: 1, Blocks: []Block{}}}
 	root.Children = append(root.Children, opts.ExtractChild(ctx, "a.txt", "text/plain", data, 5))
 	if !reflect.DeepEqual(depths, []int{1, 2}) {
 		t.Errorf("child depths = %v, want [1 2]", depths)

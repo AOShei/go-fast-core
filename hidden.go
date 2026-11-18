@@ -378,11 +378,16 @@ func (t *Table) visible(exclude Hidden) *Table {
 //     what it finds, so that every format detects the same characters;
 //   - copies Part.Hidden onto every block, so that "b.Hidden != 0" is the
 //     only test a consumer needs;
-//   - adds one WarnTextHidden warning to the part if any block is flagged.
+//   - adds one WarnTextHidden warning to the part if any block is flagged;
+//   - makes Blocks an empty list instead of nil when the part has no
+//     blocks (a failed or blank page), so that JSON has [] and not null.
 //
 // It touches only the part, so page workers can call it concurrently. It
 // is idempotent.
 func (p *Part) MarkHidden() {
+	if p.Blocks == nil {
+		p.Blocks = []Block{}
+	}
 	var all Hidden
 	n := 0
 	for i := range p.Blocks {
