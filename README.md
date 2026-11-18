@@ -172,8 +172,8 @@ Shared codes (constants `Warn*`):
 | `text.unmapped_glyphs` | Some text has no Unicode mapping in the source and appears as U+FFFD or is absent |
 | `image.unsupported_encoding` | Image data was requested and an image uses an encoding the extractor cannot deliver; its block has no data |
 | `input.repaired` | The input was structurally damaged and was read by a recovery path |
-| `input.active_content` | The input contains something meant to be run (macros, scripts). It is not read and never run |
-| `input.external_reference` | The input refers to a file or address outside itself other than by an ordinary hyperlink (a remote template, a linked picture). Nothing is fetched |
+| `input.active_content` | The input contains something meant to be run, or an instruction to run something: macros, scripts, an action that starts a program or opens a file. It is not read and never run |
+| `input.external_reference` | The input refers to a file or address outside itself other than by an ordinary hyperlink: a remote template, a linked picture, an action that sends or loads data. Nothing is fetched or sent |
 | `input.ambiguous` | The input can be read as two different documents depending on the program, such as an archive that names a member twice in two ways |
 | `limit.exceeded` | A limit was reached during extraction; the output is truncated there |
 | `child.not_extracted` | An embedded document is listed but was not extracted |

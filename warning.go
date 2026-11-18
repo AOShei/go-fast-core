@@ -63,12 +63,18 @@ const (
 	WarnInputRepaired = "input.repaired"
 
 	// WarnInputActiveContent: the input contains something meant to be
-	// run: macros, scripts. It is not read and never run.
+	// run, or an instruction to run something: macros, scripts, an action
+	// that starts a program or opens a file (a PDF Launch action). It is
+	// not read and never run. An instruction that names a file or address
+	// outside the input is also WarnInputExternalReference; the two are
+	// separate facts.
 	WarnInputActiveContent = "input.active_content"
 
 	// WarnInputExternalReference: the input refers to a file or address
 	// outside itself other than by an ordinary hyperlink: a remote
-	// template, a linked picture, a linked object. Nothing is fetched.
+	// template, a linked picture, a linked object, an action that sends
+	// form data to or loads data from an address. Nothing is fetched or
+	// sent.
 	WarnInputExternalReference = "input.external_reference"
 
 	// WarnInputAmbiguous: the input can be read as two different
