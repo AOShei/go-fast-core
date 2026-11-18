@@ -1,0 +1,61 @@
+package gofastcore
+
+// Warning records a non-fatal problem encountered during extraction.
+//
+// A warning states what happened. It never recommends what to do next:
+// the go-fast libraries do no OCR and call no external service, so a code
+// says "this part has images and no text", not "this part needs OCR".
+// The caller decides what follows from the fact.
+type Warning struct {
+	// Code is a stable machine-readable identifier. The codes shared by
+	// all extractors are the Warn* constants; an extractor may add its own
+	// under a format prefix, e.g. "pdf.xref_rebuilt".
+	Code     string   `json:"code"`
+	Severity Severity `json:"severity"`
+	// Message is free text for people. Programs should switch on Code.
+	Message string `json:"message,omitempty"`
+}
+
+// Warning codes shared by all extractors. Each describes an observed fact
+// about the input or the output.
+const (
+	// WarnPartFailed: the part could not be parsed. Its blocks are missing
+	// or incomplete. Severity error.
+	WarnPartFailed = "part.failed"
+
+	// WarnPartNoText: the part was parsed and contains no text and no
+	// images, e.g. a blank page or a page of vector drawing only.
+	WarnPartNoText = "part.no_text"
+
+	// WarnPartImageOnly: the part was parsed and contains no text, but
+	// does contain image content. This is what a scanned page looks like.
+	// It is reported whatever Options.Images is set to.
+	WarnPartImageOnly = "part.image_only"
+
+	// WarnTextUnmappedGlyphs: some text has no Unicode mapping in the
+	// source and appears as U+FFFD or is absent.
+	WarnTextUnmappedGlyphs = "text.unmapped_glyphs"
+
+	// WarnImageUnsupportedEncoding: an image uses an encoding the
+	// extractor cannot read; its block is present without pixel
+	// dimensions or data.
+	WarnImageUnsupportedEncoding = "image.unsupported_encoding"
+
+	// WarnInputRepaired: the input was structurally damaged and was read
+	// by a recovery path. Severity info if nothing is known to be lost.
+	WarnInputRepaired = "input.repaired"
+
+	// WarnLimitExceeded: a limit from Options.Limits was reached during
+	// extraction and the output is truncated at that point. Severity
+	// error.
+	WarnLimitExceeded = "limit.exceeded"
+
+	// WarnChildNotExtracted: an embedded document is listed in Children
+	// with its name and size but was not extracted, because no child
+	// extractor was supplied or the depth limit was reached.
+	WarnChildNotExtracted = "child.not_extracted"
+
+	// WarnChildFailed: extraction of an embedded document was attempted
+	// and returned an error. Severity error.
+	WarnChildFailed = "child.failed"
+)
