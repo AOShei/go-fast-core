@@ -82,7 +82,8 @@ Every block may also carry:
 - **Parts are self-contained.** A part owns its blocks and its warnings. A page worker fills one `Part` with no shared state and no locking, and a part handed on by itself is complete.
 - **Structure first, Markdown derived.** `Markdown()` and `Text()` render the blocks. Extractors never emit Markdown strings.
 - **Provenance, not confidence.** `Origin` says whether structure was declared or guessed. There is no numeric score: heuristics do not produce calibrated probabilities. A consumer that needs certainty treats `inferred` blocks as plain text and chunks by size.
-- **Tables are `[][]string`.** Merged cells put their text top-left and are listed in `Merges`. Numbers and dates appear as the source displays them.
+- **Tables are `[][]string`.** Merged cells put their text top-left and are listed in `Merges`. Numbers appear as the source displays them: thousands separators, decimals, percent and currency signs as formatted.
+- **Dates and times stored as values are written in ISO 8601**, whatever the display format: `2026-03-04`, `2026-03-04T14:30:00`, `14:30:00`. This is the one exception to "as displayed", and it applies where the source holds a date as a value with a display format beside it (a spreadsheet cell), not to dates written as text. The reason is that `03/04/2026` means two different days depending on where the file was made, and the file does not always say. The exception standardises and loses nothing: every component the value holds is kept, so a cell with a time of day keeps it, and a fraction of a second is kept where there is one.
 - **Furniture is kept but tagged.** Running headers and footers are `header`/`footer` blocks; the renderers drop them by default.
 - **Partial results beat errors.** A document that is 95% readable returns with warnings. An error means nothing usable came out.
 
