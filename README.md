@@ -296,7 +296,7 @@ type Extractor interface {
 
 Extractors wrap these, so test with `errors.Is`: `ErrPasswordRequired`, `ErrWrongPassword`, `ErrUnsupported`, `ErrMalformed`, `ErrLimitExceeded`, `ErrNoPartsSelected`.
 
-Only `MaxInputBytes` produces `ErrLimitExceeded`. Every other limit truncates the document and adds a `limit.exceeded` warning with severity `error`. `MaxParts` returns the first `MaxParts` parts of the requested range, also where the part count is known up front.
+`ErrLimitExceeded` means a limit stopped the extraction before there was anything to return. That is always so for `MaxInputBytes`, and it is so for any other limit reached before the input could even be identified (a decompression bomb in the part that says what the file is). A limit reached once there is a document truncates it and adds a `limit.exceeded` warning with severity `error`; an error is never returned together with a document. `MaxParts` returns the first `MaxParts` parts of the requested range, also where the part count is known up front.
 
 ### Embedded documents
 

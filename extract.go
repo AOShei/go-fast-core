@@ -42,9 +42,13 @@ var (
 	ErrUnsupported = errors.New("gofastcore: unsupported input")
 	// ErrMalformed: the input is not a readable file of the expected format.
 	ErrMalformed = errors.New("gofastcore: malformed input")
-	// ErrLimitExceeded: the input exceeds Limits.MaxInputBytes. Every
-	// other limit truncates the document and adds WarnLimitExceeded
-	// instead of failing.
+	// ErrLimitExceeded: a limit stopped the extraction before there was
+	// anything to return. That is always the case when the input exceeds
+	// Limits.MaxInputBytes, and it is the case for any other limit that is
+	// reached before the input could even be identified, such as a
+	// decompression bomb in the part that says what the file is. A limit
+	// reached once there is a document truncates it and adds
+	// WarnLimitExceeded instead of failing.
 	ErrLimitExceeded = errors.New("gofastcore: limit exceeded")
 	// ErrNoPartsSelected: Options.Parts selects no part of the input,
 	// because it lies beyond the last part or First is greater than Last.
