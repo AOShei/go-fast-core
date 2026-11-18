@@ -36,6 +36,13 @@ const (
 	// source and appears as U+FFFD or is absent.
 	WarnTextUnmappedGlyphs = "text.unmapped_glyphs"
 
+	// WarnTextHidden: the part contains text that a reader of the source
+	// cannot see; the blocks concerned carry the reasons in Block.Hidden.
+	// One per part, added by Part.MarkHidden. Severity info when the only
+	// reason is the text layer of a scanned page, warning otherwise. On a
+	// document it means a metadata string contains invisible characters.
+	WarnTextHidden = "text.hidden"
+
 	// WarnImageUnsupportedEncoding: image data was requested
 	// (ImagesData) and an image uses an encoding the extractor cannot
 	// deliver; its block is present without data.

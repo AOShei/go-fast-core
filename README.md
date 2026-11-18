@@ -17,6 +17,8 @@ import "github.com/AOShei/go-fast-core" // package gofastcore
 - **Format-specific settings.** `Options` holds only what every format understands. Settings for one format (for PDF: memory mapping, a cache budget) are fields on that library's extractor value: `gofastpdf.Extractor{...}.Extract(...)`.
 - **Dependencies.** The standard library and other go-fast modules only. `go-fast-core` itself imports only the standard library. Any other dependency must be challenged.
 - **Layering.** The shared model is the common denominator across formats. An extractor may offer a richer native API beside it (for PDF: word and line boxes, font names and sizes, glyph positions). Those details stay out of core.
+- **Preserve content.** Anything that is real content, whether it carries meaning or provides context, is preserved where possible. Normalizing a representation is fine (a ligature to its letters, `\r\n` to `\n`); dropping or flattening something the author put there is not. This is why tabs are kept in text, running headers and footers are tagged instead of removed, and an attachment that cannot be extracted is still listed.
+- **Flag hidden text, never drop it.** Text a reader cannot see is extracted like any other and marked with the reason it is hidden. The libraries report the fact; whether it is an attack or a scanned page's text layer is the caller's judgement. See [Hidden text](#hidden-text).
 - **No OCR.** The go-fast libraries extract what the file contains. They report what they found and leave the next step to the caller.
 
 ## The model
@@ -53,9 +55,10 @@ A block has a `Kind`, usually `Text`, and kind-specific fields:
 Every block may also carry:
 
 - `Origin`: `native` when the source declares the block's kind, level and boundaries (a docx style, an HTML tag, a tagged-PDF element, a PDF outline entry), `inferred` when the extractor deduced them from geometry or fonts. Absent in JSON means `native`. It does not cover the block's position in the reading order: a PDF image is `native` even though where it falls among the text is inferred.
+- `Hidden`: the reasons text in this block is not visible to a reader of the source. Absent in JSON means none was found. See [Hidden text](#hidden-text).
 - `Continued`: this block continues the last block of the same kind in the previous part, such as a paragraph split by a page break.
 - `Loc`: where it came from. `BBox` for paged formats, `Range` (A1 notation) for sheets, `Offset`/`Length` for plain-text formats. This is what lets a retrieval hit be cited.
-- `Spans`: optional inline bold/italic/link ranges over `Text`.
+- `Spans`: inline bold/italic/link ranges over `Text` (optional), and the ranges that are hidden (always present when part of a block is hidden).
 - `Attrs`: format-specific key/values with no dedicated field.
 
 ### Design decisions
@@ -78,7 +81,8 @@ Every block may also carry:
 6. A block that runs across a part boundary is either assigned to the part where it starts or split, with `Continued` set on the later piece.
 7. `Table` is set exactly on `table` blocks, `Image` exactly on `image` blocks.
 8. `Extract` is safe to call from many goroutines and honors context cancellation.
-9. Output is deterministic: the same input and options give the same document whatever `Options.Workers` is, including where a limit truncates it.
+9. Hidden text is extracted and flagged, never dropped. Every extractor calls `part.MarkHidden()` on each finished part.
+10. Output is deterministic: the same input and options give the same document whatever `Options.Workers` is, including where a limit truncates it.
 
 `doc.Validate()` checks everything mechanical in rules 1, 4, 5 and 7, plus spans, tables, merges, warnings and enum values. Run it on every test fixture and fuzz output:
 
@@ -144,6 +148,7 @@ Shared codes (constants `Warn*`):
 | `part.failed` | The part could not be parsed; its blocks are missing or incomplete |
 | `part.no_text` | The part was parsed and contains no text and no images |
 | `part.image_only` | The part was parsed and contains no text, but does contain image content. Reported whatever `Options.Images` is set to |
+| `text.hidden` | The part contains text a reader of the source cannot see; the blocks carry the reasons. Severity `info` when the only reason is a scan's text layer |
 | `text.unmapped_glyphs` | Some text has no Unicode mapping in the source and appears as U+FFFD or is absent |
 | `image.unsupported_encoding` | Image data was requested and an image uses an encoding the extractor cannot deliver; its block has no data |
 | `input.repaired` | The input was structurally damaged and was read by a recovery path |
@@ -166,6 +171,80 @@ for i := range doc.Parts {
 }
 ```
 
+## Hidden text
+
+Text that a reader of the source cannot see still reaches whatever consumes the extracted text. Planting instructions that way is a known method of poisoning the context of an AI system. Hidden text also has ordinary uses: the text layer of a scanned page, screen-reader text, a collapsed menu, a lookup sheet.
+
+The go-fast libraries do not decide which it is. They **extract hidden text like any other and flag it with the reason it is not visible**, so the caller can review, quarantine or exclude it.
+
+**A flag is evidence that text is hidden. No flag is not evidence that a document is safe.** An extractor cannot see text inside images, a font whose glyphs display one thing and map to another, or visibility controlled by external stylesheets and scripts.
+
+### Reasons
+
+| Reason | Meaning |
+|---|---|
+| `invisible` | The source marks the text as not displayed: PDF invisible render mode or a layer that is off; Word hidden-text formatting; a hidden slide, sheet, row or column; HTML `display:none`, `visibility:hidden`, `hidden` |
+| `text_layer` | Invisible text lying over an image, which is how a scanned page's searchable text is stored. Used instead of `invisible`. Nothing verifies that it matches the image |
+| `tiny` | Displayed smaller than 2 points (`HiddenTinySize`) |
+| `low_contrast` | Text color indistinguishable from what is behind it: WCAG contrast ratio under 1.2 (`HiddenContrastRatio`, `LowContrast`) |
+| `off_page` | Positioned outside the visible area of the page, slide or viewport |
+| `clipped` | Outside a clipping region, including a box too small to show the text with overflow cut off |
+| `occluded` | Covered by an image or a filled shape |
+| `transparent` | Drawn with zero opacity |
+| `invisible_chars` | Contains characters that display as nothing yet can carry a payload (`InvisibleChars`) |
+
+The thresholds live in core so that a reason means the same in every format.
+
+`invisible_chars` covers Unicode tag characters (which mirror ASCII invisibly and which language models can read), the bidirectional overrides U+202D and U+202E, runs of four or more zero-width characters, and runs of two or more variation selectors. Single zero-width characters and well-formed emoji sequences are ordinary text and are not flagged. Core runs this scan for every format, plain text included.
+
+### Where the flag is
+
+- **`Block.Hidden`** lists every reason found in the block. `b.Hidden != 0` is the only test needed to find hidden content.
+- **Part of a block.** When only a passage is hidden, a `Span` with `Hidden` set marks the range; for a table, a `HiddenCells` region marks the cells. A reason that appears on a span or region applies only there. A reason that appears on none applies to the whole block. `b.HiddenWhole()` and `b.VisibleText(exclude)` do this arithmetic.
+- **`Part.Hidden`** marks a whole hidden sheet or slide; its blocks carry the same reasons.
+- **One `text.hidden` warning per part** that has any, so "does this document contain hidden text?" is one loop over the parts.
+
+```json
+{"kind": "paragraph", "hidden": "low_contrast",
+ "text": "Visible one. Hidden sentence. Visible two.",
+ "spans": [{"start": 13, "end": 29, "hidden": "low_contrast"}]}
+```
+
+A reason added by a newer extractor decodes as `unknown` and is kept, so hidden text never looks visible to an older consumer.
+
+### Using it
+
+```go
+for part, b := range doc.AllBlocks() {
+    if b.Hidden != 0 {
+        review(part.Number, b.Hidden, b.Text) // the caller's decision
+    }
+}
+```
+
+`Markdown()` and `Text()` include hidden text by default: flagging does not block extraction. To leave it out of rendered output:
+
+```go
+// Everything hidden:
+doc.WriteText(w, &gofastcore.RenderOptions{ExcludeHidden: gofastcore.HiddenAny})
+
+// Everything hidden except the text layer of scanned pages,
+// which would otherwise render empty:
+doc.WriteText(w, &gofastcore.RenderOptions{
+    ExcludeHidden: gofastcore.HiddenAny &^ gofastcore.HiddenTextLayer,
+})
+```
+
+Exclusion cuts exactly the flagged ranges, so smuggled invisible characters are stripped while the visible sentence around them stays.
+
+### For extractor authors
+
+1. Set the reasons only your format can know, on the block, span, table region or part.
+2. Never merge hidden text into a visible block without marking the range.
+3. Call `part.MarkHidden()` once per finished part. It runs the invisible-character scan, copies `Part.Hidden` to the blocks and adds the `text.hidden` warning. `Validate` fails if it was skipped.
+4. Cheap checks always run. Checks that need extra work (knowing what is drawn behind or over the text) run when `Options.DeepHidden` is set. Document which is which.
+5. Metadata strings cannot carry a block flag. If `InvisibleChars` finds something in one, add a document-level `text.hidden` warning.
+
 ## Extractor interface
 
 ```go
@@ -182,6 +261,7 @@ type Extractor interface {
 | `Workers` | Goroutines inside one document; 0 means all CPUs |
 | `Images` | `ImagesNone`, `ImagesMeta` (position and size), `ImagesData` (bytes too) |
 | `Spans` | Ask for inline formatting and links |
+| `DeepHidden` | Also run the hidden-text checks that cost extra work (contrast against drawn backgrounds, occlusion, clipping) |
 | `Password` | Tried on encrypted input, and passed down to embedded documents |
 | `Parts` | `PartRange{First, Last}`, inclusive part numbers; zero value means all; a range that selects nothing is `ErrNoPartsSelected` |
 | `Limits` | `MaxInputBytes`, `MaxDecodedBytes`, `MaxParts`, `MaxDepth`. Zero means the extractor's default; negative means no limit |

@@ -149,8 +149,21 @@ func (v *validator) document(d *Document, path string, top bool) {
 		}
 		v.text(pp+".name", p.Name)
 		v.warnings(pp+".warnings", p.Warnings)
+		if !p.Hidden.Valid() {
+			v.bad("%s: invalid hidden reasons %#x", pp, uint16(p.Hidden))
+		}
+		anyHidden := false
 		for j := range p.Blocks {
-			v.block(&p.Blocks[j], fmt.Sprintf("%s.blocks[%d]", pp, j))
+			b := &p.Blocks[j]
+			bp := fmt.Sprintf("%s.blocks[%d]", pp, j)
+			v.block(b, bp)
+			if b.Hidden&p.Hidden != p.Hidden {
+				v.bad("%s: lacks the hidden reasons of its part (%s)", bp, p.Hidden)
+			}
+			anyHidden = anyHidden || b.Hidden != 0
+		}
+		if anyHidden && !p.Has(WarnTextHidden) {
+			v.bad("%s: has hidden blocks but no %s warning; call Part.MarkHidden", pp, WarnTextHidden)
 		}
 	}
 
@@ -183,6 +196,12 @@ func (v *validator) block(b *Block, bp string) {
 	}
 	v.text(bp+".marker", b.Marker)
 	v.textMap(bp+".attrs", b.Attrs)
+	if !b.Hidden.Valid() {
+		v.bad("%s: invalid hidden reasons %#x", bp, uint16(b.Hidden))
+	}
+	if b.Hidden&HiddenChars == 0 && InvisibleChars(b.Text) != nil {
+		v.bad("%s.text contains invisible characters that are not flagged; call Part.MarkHidden", bp)
+	}
 
 	switch b.Kind {
 	case KindHeading:
@@ -207,6 +226,9 @@ func (v *validator) block(b *Block, bp string) {
 	for k, s := range b.Spans {
 		sp := fmt.Sprintf("%s.spans[%d]", bp, k)
 		v.text(sp+".href", s.Href)
+		if s.Hidden&^b.Hidden != 0 {
+			v.bad("%s: hidden reasons %s are not in the block's (%s)", sp, s.Hidden, b.Hidden)
+		}
 		if s.Start < 0 || s.End > len(b.Text) || s.Start >= s.End {
 			v.bad("%s: range [%d,%d) outside text of length %d", sp, s.Start, s.End, len(b.Text))
 			continue
@@ -231,6 +253,28 @@ func (v *validator) block(b *Block, bp string) {
 	}
 	if t := b.Table; t != nil {
 		v.table(t, bp)
+		cols := 0
+		if len(t.Rows) > 0 {
+			cols = len(t.Rows[0])
+		}
+		for k, h := range t.Hidden {
+			if h.Row < 0 || h.Col < 0 || h.RowSpan < 1 || h.ColSpan < 1 ||
+				h.Row+h.RowSpan > len(t.Rows) || h.Col+h.ColSpan > cols {
+				v.bad("%s: hidden region %d (%+v) is outside the %dx%d grid", bp, k, h, len(t.Rows), cols)
+			}
+			if h.Hidden == 0 || h.Hidden&^b.Hidden != 0 {
+				v.bad("%s: hidden region %d has reasons %q, which must be non-empty and in the block's (%s)", bp, k, h.Hidden, b.Hidden)
+			}
+		}
+		if b.Hidden&HiddenChars == 0 {
+			for _, row := range t.Rows {
+				for _, cell := range row {
+					if InvisibleChars(cell) != nil {
+						v.bad("%s: a table cell contains invisible characters that are not flagged; call Part.MarkHidden", bp)
+					}
+				}
+			}
+		}
 	}
 }
 

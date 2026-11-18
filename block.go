@@ -36,6 +36,14 @@ type Block struct {
 	// on every such block.
 	Origin Origin `json:"origin,omitempty"`
 
+	// Hidden lists every reason why text in this block is not visible to
+	// a reader of the source; zero means none was found. A reason that
+	// also appears on a span, or on a HiddenCells region of a table,
+	// applies only there; any other reason applies to the whole block. See
+	// HiddenWhole and VisibleText. Hidden text is never dropped: it is
+	// extracted and flagged.
+	Hidden Hidden `json:"hidden,omitempty"`
+
 	// Continued marks a block that continues the last block of the same
 	// kind in the preceding part, e.g. the second half of a paragraph
 	// split by a page break. Optional: an extractor that cannot tell
@@ -47,8 +55,10 @@ type Block struct {
 	Ordered bool   `json:"ordered,omitempty"`
 	Marker  string `json:"marker,omitempty"`
 
-	// Spans carries inline formatting and links over Text. Optional:
-	// extractors may leave it nil, and consumers must work without it.
+	// Spans carries inline formatting and links over Text, and marks the
+	// ranges that are hidden. Formatting and links are optional and only
+	// produced when Options.Spans is set; spans with Hidden set are always
+	// produced.
 	Spans []Span `json:"spans,omitempty"`
 
 	Table *Table `json:"table,omitempty"`
@@ -89,8 +99,8 @@ type Rect struct {
 	Y1 float64 `json:"y1"`
 }
 
-// Span marks the range [Start, End) of Block.Text with inline styling
-// and/or a link target. Spans may overlap.
+// Span marks the range [Start, End) of Block.Text with inline styling, a
+// link target, or the reasons that range is hidden. Spans may overlap.
 //
 // Start and End are byte offsets into the UTF-8 text, not character
 // offsets, and always fall on character boundaries. A consumer in a
@@ -102,6 +112,9 @@ type Span struct {
 	End   int    `json:"end"`
 	Style Style  `json:"style,omitempty"`
 	Href  string `json:"href,omitempty"`
+	// Hidden gives the reasons this range is not visible when only part
+	// of the block is hidden. Every reason here is also in Block.Hidden.
+	Hidden Hidden `json:"hidden,omitempty"`
 }
 
 // Table is a rectangular grid of cell text. Every row has the same number
@@ -115,6 +128,10 @@ type Table struct {
 	HeaderRows int        `json:"header_rows,omitempty"`
 	Rows       [][]string `json:"rows"`
 	Merges     []Merge    `json:"merges,omitempty"`
+	// Hidden marks the cells that are hidden when only part of the table
+	// is: a hidden row or column, a cell with white text. Every reason
+	// here is also in Block.Hidden.
+	Hidden []HiddenCells `json:"hidden,omitempty"`
 }
 
 // Merge is a merged cell region. Row and Col are 0-based; RowSpan and

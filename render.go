@@ -17,6 +17,11 @@ type RenderOptions struct {
 	// in the rendered text: "<!-- page 3 -->" in Markdown, "[page 3]" in
 	// plain text.
 	PartMarkers bool
+	// ExcludeHidden leaves out text hidden for any of the given reasons.
+	// The default is to include everything. Use HiddenAny to exclude all
+	// hidden text, or HiddenAny &^ HiddenTextLayer to keep the text layer
+	// of scanned pages, which would otherwise render empty.
+	ExcludeHidden Hidden
 }
 
 // Markdown renders the document (not its children) as Markdown with
@@ -94,6 +99,9 @@ func (r *renderer) finish() error {
 }
 
 func (r *renderer) part(p *Part) {
+	if p.Hidden&r.opts.ExcludeHidden != 0 {
+		return
+	}
 	if r.opts.PartMarkers {
 		if r.any {
 			r.w.WriteString("\n\n")
@@ -137,6 +145,18 @@ func joinable(k Kind) bool {
 }
 
 func (r *renderer) block(b *Block) {
+	if exclude := r.opts.ExcludeHidden; b.Hidden&exclude != 0 {
+		if b.HiddenWhole()&exclude != 0 {
+			return
+		}
+		visible := *b
+		if b.Table != nil {
+			visible.Table = b.Table.visible(exclude)
+		} else if visible.Text = b.VisibleText(exclude); visible.Text == "" && b.Kind != KindImage {
+			return
+		}
+		b = &visible
+	}
 	if r.skip(b) {
 		return
 	}

@@ -38,6 +38,8 @@
 //     part where it starts or split, with Continued set on the later piece.
 //   - Partial extraction returns a Document with warnings, not an error.
 //     Errors are for input that yields nothing usable.
+//   - Hidden text is extracted and flagged, never dropped; see Hidden.
+//     Every extractor calls Part.MarkHidden on each finished part.
 //   - Output is deterministic: the same input and options give the same
 //     Document whatever Options.Workers is, including where a limit
 //     truncates it.
@@ -165,8 +167,12 @@ type Part struct {
 	// Width and Height give the part's coordinate space for Block.Loc.BBox,
 	// as the part is displayed. For PDF: the CropBox after /Rotate and
 	// UserUnit are applied, in points. Zero when the part has no geometry.
-	Width    float64   `json:"width,omitempty"`
-	Height   float64   `json:"height,omitempty"`
+	Width  float64 `json:"width,omitempty"`
+	Height float64 `json:"height,omitempty"`
+	// Hidden gives the reasons the whole part is not shown to a reader: a
+	// hidden sheet or slide. Every block of the part carries the same
+	// reasons (MarkHidden copies them).
+	Hidden   Hidden    `json:"hidden,omitempty"`
 	Blocks   []Block   `json:"blocks"`
 	Warnings []Warning `json:"warnings,omitempty"`
 }
