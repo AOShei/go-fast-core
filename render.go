@@ -185,6 +185,11 @@ func (r *renderer) markdown(b *Block, joined bool) {
 	case KindHeading:
 		w.WriteString(strings.Repeat("#", min(max(int(b.Level), 1), 6)))
 		w.WriteByte(' ')
+		if b.Marker != "" {
+			// A numbered heading: "## 2.3 Scope".
+			w.WriteString(oneLine(b.Marker))
+			w.WriteByte(' ')
+		}
 		w.WriteString(oneLine(b.Text))
 
 	case KindListItem:
@@ -351,6 +356,10 @@ func (r *renderer) plain(b *Block, joined bool) {
 	w := r.w
 	switch b.Kind {
 	case KindHeading:
+		if b.Marker != "" {
+			w.WriteString(oneLine(b.Marker))
+			w.WriteByte(' ')
+		}
 		w.WriteString(oneLine(b.Text))
 
 	case KindListItem:

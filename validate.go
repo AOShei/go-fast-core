@@ -256,6 +256,7 @@ func (v *validator) block(b *Block, bp string) {
 		v.bad("%s: bbox has negative size", bp)
 	}
 	v.text(bp+".loc.range", b.Loc.Range)
+	v.text(bp+".loc.anchor", b.Loc.Anchor)
 	if b.Loc.Offset < 0 || b.Loc.Length < 0 {
 		v.bad("%s: negative source offset or length", bp)
 	}

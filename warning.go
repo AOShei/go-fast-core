@@ -43,6 +43,16 @@ const (
 	// document it means a metadata string contains invisible characters.
 	WarnTextHidden = "text.hidden"
 
+	// WarnTextTrackedChanges: the part has tracked changes. Its text is
+	// given as if all were accepted; each deletion is kept as a note block
+	// of type NoteDeletion.
+	WarnTextTrackedChanges = "text.tracked_changes"
+
+	// WarnHeadingLevelClamped: the part has headings deeper than six
+	// levels. Each has Level 6 and its real level in Attrs[AttrLevel].
+	// Severity info: nothing is lost.
+	WarnHeadingLevelClamped = "structure.heading_level_clamped"
+
 	// WarnImageUnsupportedEncoding: image data was requested
 	// (ImagesData) and an image uses an encoding the extractor cannot
 	// deliver; its block is present without data.
@@ -51,6 +61,21 @@ const (
 	// WarnInputRepaired: the input was structurally damaged and was read
 	// by a recovery path. Severity info if nothing is known to be lost.
 	WarnInputRepaired = "input.repaired"
+
+	// WarnInputActiveContent: the input contains something meant to be
+	// run: macros, scripts. It is not read and never run.
+	WarnInputActiveContent = "input.active_content"
+
+	// WarnInputExternalReference: the input refers to a file or address
+	// outside itself other than by an ordinary hyperlink: a remote
+	// template, a linked picture, a linked object. Nothing is fetched.
+	WarnInputExternalReference = "input.external_reference"
+
+	// WarnInputAmbiguous: the input can be read as two different
+	// documents, depending on the program: an archive that names a member
+	// twice in two ways, or has two members with one name. Which reading
+	// this extractor takes is in its documentation.
+	WarnInputAmbiguous = "input.ambiguous"
 
 	// WarnLimitExceeded: a limit from Options.Limits was reached during
 	// extraction and the output is truncated at that point. Severity

@@ -40,7 +40,7 @@ A block has a `Kind`, usually `Text`, and kind-specific fields:
 
 | Kind | Text | Level | Other fields |
 |---|---|---|---|
-| `heading` | heading text | 1–6 | |
+| `heading` | heading text | 1–6 | `Marker` for a numbered heading; `Attrs["level"]` if the source level is deeper than 6 |
 | `paragraph` | paragraph text | | |
 | `list_item` | item text without the marker | nesting depth, from 1 | `Ordered`, `Marker` |
 | `table` | empty | | `Table` (rows of cell strings, header row count, merges) |
@@ -50,7 +50,7 @@ A block has a `Kind`, usually `Text`, and kind-specific fields:
 | `caption` | caption text | | |
 | `footnote` | note text | | `Marker` |
 | `formula` | LaTeX or plain text | | |
-| `note` | speaker note or comment | | |
+| `note` | speaker note, comment, or text removed by a tracked change | | `Attrs`: `type`, `author`, `date` |
 | `header`, `footer` | running page header/footer | | |
 
 Every block may also carry:
@@ -58,9 +58,23 @@ Every block may also carry:
 - `Origin`: `native` when the source declares the block's kind, level and boundaries (a docx style, an HTML tag, a tagged-PDF element, a PDF outline entry), `inferred` when the extractor deduced them from geometry or fonts. Absent in JSON means `native`. It does not cover the block's position in the reading order: a PDF image is `native` even though where it falls among the text is inferred.
 - `Hidden`: the reasons text in this block is not visible to a reader of the source. Absent in JSON means none was found. See [Hidden text](#hidden-text).
 - `Continued`: this block continues the last block of the same kind in the previous part, such as a paragraph split by a page break.
-- `Loc`: where it came from. `BBox` for paged formats, `Range` (A1 notation) for sheets, `Offset`/`Length` for plain-text formats. This is what lets a retrieval hit be cited.
+- `Loc`: where it came from. `BBox` for paged formats, `Range` (A1 notation) for sheets, `Offset`/`Length` for plain-text formats, `Anchor` for formats where the source itself names its blocks (a Word paragraph id, an HTML `id`, an e-book fragment). This is what lets a retrieval hit be cited.
 - `Spans`: inline bold/italic/link ranges over `Text` (optional), and the ranges that are hidden (always present when part of a block is hidden).
 - `Attrs`: format-specific key/values with no dedicated field.
+
+### Labels, notes and deep headings
+
+- **`Marker` is the label a reader sees in front of a block**: the label of a list item (`3.`, `(a)`, `4.2.1`), the number of a numbered heading (`2.3`), the mark of a footnote. It is content (a contract refers to "clause 4.2"), it is kept out of `Text`, and `Markdown()` and `Text()` put it back in front: `## 2.3 Scope`.
+- **`note` blocks say what they are in `Attrs`**, under keys every format spells the same way (constants `AttrNoteType`, `AttrAuthor`, `AttrDate`):
+
+  | `type` | Meaning |
+  |---|---|
+  | `comment` | A reviewer's comment or annotation attached to the content |
+  | `deletion` | Text removed by a tracked change. The document's text is given as if the change were accepted; the removed text is kept here |
+  | `speaker` | The speaker's notes of a slide |
+
+  `author` and `date` are as the source gives them.
+- **Heading levels are 1 to 6.** A source with deeper levels (Word has nine) has them clamped to 6, with the real level in `Attrs["level"]`, and the part carries the `structure.heading_level_clamped` warning at severity `info`. Levels above six are not allowed because Markdown has none.
 
 ### Design decisions
 
@@ -153,9 +167,14 @@ Shared codes (constants `Warn*`):
 | `part.no_text` | The part was parsed and contains no text and no images |
 | `part.image_only` | The part was parsed and contains no text, but does contain image content. Reported whatever `Options.Images` is set to |
 | `text.hidden` | The part contains text a reader of the source cannot see; the blocks carry the reasons. Severity `info` when the only reason is a scan's text layer |
+| `text.tracked_changes` | The part has tracked changes. Its text is given as if all were accepted; each deletion is kept as a `note` block of type `deletion` |
+| `structure.heading_level_clamped` | The part has headings deeper than six levels; each has level 6 and its real level in `Attrs["level"]` |
 | `text.unmapped_glyphs` | Some text has no Unicode mapping in the source and appears as U+FFFD or is absent |
 | `image.unsupported_encoding` | Image data was requested and an image uses an encoding the extractor cannot deliver; its block has no data |
 | `input.repaired` | The input was structurally damaged and was read by a recovery path |
+| `input.active_content` | The input contains something meant to be run (macros, scripts). It is not read and never run |
+| `input.external_reference` | The input refers to a file or address outside itself other than by an ordinary hyperlink (a remote template, a linked picture). Nothing is fetched |
+| `input.ambiguous` | The input can be read as two different documents depending on the program, such as an archive that names a member twice in two ways |
 | `limit.exceeded` | A limit was reached during extraction; the output is truncated there |
 | `child.not_extracted` | An embedded document is listed but was not extracted |
 | `child.unsupported` | No extractor handles the embedded document's format, or it uses an unimplemented feature |
@@ -317,10 +336,10 @@ doc.Children = append(doc.Children, opts.ExtractChild(ctx, name, mime, reader, s
 | Format | Part kind | Notes |
 |---|---|---|
 | pdf | `page` | `BBox` on blocks; structure is `inferred` unless the PDF is tagged or the outline confirms a heading |
-| docx, odt, rtf | one `body` | Heading styles give levels; comments become `note` |
+| docx, odt, rtf | one `body` | Heading styles and outline levels give levels; numbered headings and list items carry `Marker`; comments and tracked deletions become `note`; `Loc.Anchor` is the paragraph id |
 | pptx, odp | `slide` | `Name` is the slide title; speaker notes become `note` |
 | xlsx, ods, csv | `sheet` | `Name` is the sheet name; each used region is a `table` with `Loc.Range` |
-| html, md, txt | one `body` | `Loc.Offset`/`Length` into the source |
+| html, md, txt | one `body` | `Loc.Offset`/`Length` into the source; `Loc.Anchor` from `id` attributes |
 | epub | `chapter` | One per spine item; nav becomes `Outline` |
 | eml, msg, mbox | `message` | Headers in `Metadata.Extra`; attachments in `Children` |
 

@@ -5,7 +5,7 @@ package gofastcore
 // Which fields are meaningful depends on Kind:
 //
 //	Kind             Text                 Level           Other
-//	KindHeading      heading text         1-6             -
+//	KindHeading      heading text         1-6             Marker
 //	KindParagraph    paragraph text       -               -
 //	KindListItem     item text, no marker nesting, from 1 Ordered, Marker
 //	KindTable        empty                -               Table
@@ -15,9 +15,13 @@ package gofastcore
 //	KindCaption      caption text         -               -
 //	KindFootnote     note text            -               Marker
 //	KindFormula      LaTeX or plain text  -               -
-//	KindNote         speaker note/comment -               -
+//	KindNote         speaker note/comment -               Attrs: type, author, date
 //	KindHeader       running header       -               -
 //	KindFooter       running footer       -               -
+//
+// A heading's Level is 1 to 6. A source with deeper levels (Word has nine)
+// has them clamped to 6, with the real level, in decimal, in
+// Attrs[AttrLevel]; the part then carries WarnHeadingLevelClamped.
 //
 // KindHeader and KindFooter are page furniture (repeated titles, page
 // numbers). They are kept so nothing is silently lost, and tagged so
@@ -50,8 +54,14 @@ type Block struct {
 	// leaves it false.
 	Continued bool `json:"continued,omitempty"`
 
-	// Ordered and Marker apply to list items. Marker is the literal label
-	// as it appeared ("3.", "(a)", "4.2.1") when the source provides it.
+	// Ordered applies to list items.
+	//
+	// Marker is the label a reader sees in front of the block, as it
+	// appeared, when the source provides or defines one: the label of a
+	// list item ("3.", "(a)", "4.2.1"), the number of a numbered heading
+	// ("2.3"), the mark of a footnote ("1", "*"). It is content: a
+	// contract refers to "clause 4.2". It is kept out of Text, and the
+	// renderers put it back in front.
 	Ordered bool   `json:"ordered,omitempty"`
 	Marker  string `json:"marker,omitempty"`
 
@@ -69,8 +79,40 @@ type Block struct {
 
 	// Attrs is the escape hatch for format-specific facts. Keys are
 	// lowercase. Prefer a real field once two formats need the same key.
+	// The keys every format spells the same way are the Attr* constants.
 	Attrs map[string]string `json:"attrs,omitempty"`
 }
+
+// Keys of Block.Attrs that mean the same in every format.
+const (
+	// AttrNoteType says what a KindNote block is: one of the Note*
+	// values.
+	AttrNoteType = "type"
+	// AttrAuthor is who wrote a note or made a tracked change, as the
+	// source names them.
+	AttrAuthor = "author"
+	// AttrDate is when a note was written or a change made, as the
+	// source writes it, normally ISO 8601.
+	AttrDate = "date"
+	// AttrLevel is the real level of a heading deeper than six, in
+	// decimal ("8").
+	AttrLevel = "level"
+	// AttrLanguage is the programming language of a KindCode block.
+	AttrLanguage = "language"
+)
+
+// Values of Attrs[AttrNoteType].
+const (
+	// NoteComment is a reviewer's comment or annotation attached to the
+	// content.
+	NoteComment = "comment"
+	// NoteDeletion is text removed by a tracked change. The document's
+	// text is given as if the change were accepted; the removed text is
+	// kept here.
+	NoteDeletion = "deletion"
+	// NoteSpeaker is the speaker's notes of a slide.
+	NoteSpeaker = "speaker"
+)
 
 // Location pins a block to its place in the source so that a retrieval hit
 // can be cited and shown in context. Every field is optional; the part a
@@ -88,6 +130,11 @@ type Location struct {
 	// plain-text formats (txt, md, csv, html).
 	Offset int64 `json:"offset,omitempty"`
 	Length int64 `json:"length,omitempty"`
+	// Anchor is an identifier the source itself gives the block, stable
+	// for as long as the source is: a Word paragraph id, an HTML id
+	// attribute, the fragment of an e-book link. It is what a citation
+	// points at in a format that has no pages and no byte offsets.
+	Anchor string `json:"anchor,omitempty"`
 }
 
 // Rect is an axis-aligned rectangle with (X0,Y0) top-left and (X1,Y1)

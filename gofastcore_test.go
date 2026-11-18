@@ -651,3 +651,73 @@ func TestErrorsAreDistinct(t *testing.T) {
 		}
 	}
 }
+
+func TestHeadingMarkerIsRendered(t *testing.T) {
+	d := New("docx")
+	d.HiddenChecked = HiddenChars
+	d.Parts = []Part{{Kind: PartBody, Number: 1, Blocks: []Block{
+		{Kind: KindHeading, Level: 1, Marker: "2", Text: "Terms"},
+		{Kind: KindHeading, Level: 2, Marker: "2.3", Text: "Scope"},
+		{Kind: KindParagraph, Text: "This clause applies."},
+		{Kind: KindHeading, Level: 2, Text: "Unnumbered"},
+		{Kind: KindHeading, Level: 6, Marker: "1.1.1.1.1.1.1.1", Text: "Eighth level", Attrs: map[string]string{AttrLevel: "8"}},
+	}}}
+	d.Parts[0].Warn(SeverityInfo, WarnHeadingLevelClamped, "")
+	if err := d.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	wantMD := "# 2 Terms\n\n## 2.3 Scope\n\nThis clause applies.\n\n## Unnumbered\n\n###### 1.1.1.1.1.1.1.1 Eighth level\n"
+	if got := d.Markdown(); got != wantMD {
+		t.Errorf("Markdown() = %q\nwant %q", got, wantMD)
+	}
+	wantText := "2 Terms\n\n2.3 Scope\n\nThis clause applies.\n\nUnnumbered\n\n1.1.1.1.1.1.1.1 Eighth level\n"
+	if got := d.Text(); got != wantText {
+		t.Errorf("Text() = %q\nwant %q", got, wantText)
+	}
+}
+
+func TestAnchorAndNoteAttributes(t *testing.T) {
+	d := New("docx")
+	d.HiddenChecked = HiddenChars
+	d.Parts = []Part{{Kind: PartBody, Number: 1, Blocks: []Block{
+		{Kind: KindParagraph, Text: "The price is 600.", Loc: Location{Anchor: "1A2B3C4D"}},
+		{Kind: KindNote, Text: "500", Attrs: map[string]string{AttrNoteType: NoteDeletion, AttrAuthor: "Ada", AttrDate: "2026-03-04T10:00:00Z"}},
+	}}}
+	d.Parts[0].Warn(SeverityInfo, WarnTextTrackedChanges, "")
+	if err := d.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []string{`"loc":{"anchor":"1A2B3C4D"}`, `"type":"deletion"`, `"author":"Ada"`, `"code":"text.tracked_changes"`} {
+		if !strings.Contains(string(data), s) {
+			t.Errorf("JSON lacks %s: %s", s, data)
+		}
+	}
+	back := new(Document)
+	if err := json.Unmarshal(data, back); err != nil || !reflect.DeepEqual(back, d) {
+		t.Errorf("round trip changed the document (%v)", err)
+	}
+	d.Parts[0].Blocks[0].Loc.Anchor = "bad\x00anchor"
+	if d.Validate() == nil {
+		t.Error("an anchor with a control character was accepted")
+	}
+}
+
+func TestSharedCodesAreDistinct(t *testing.T) {
+	codes := []string{
+		WarnPartFailed, WarnPartNoText, WarnPartImageOnly, WarnTextHidden, WarnTextUnmappedGlyphs, WarnTextTrackedChanges,
+		WarnHeadingLevelClamped, WarnImageUnsupportedEncoding, WarnInputRepaired, WarnInputActiveContent,
+		WarnInputExternalReference, WarnInputAmbiguous, WarnLimitExceeded, WarnChildNotExtracted, WarnChildUnsupported,
+		WarnChildEncrypted, WarnChildFailed,
+	}
+	seen := map[string]bool{}
+	for _, c := range codes {
+		if seen[c] || c == "" || strings.ToLower(c) != c || !strings.Contains(c, ".") {
+			t.Errorf("code %q is empty, repeated or malformed", c)
+		}
+		seen[c] = true
+	}
+}
