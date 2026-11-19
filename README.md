@@ -57,7 +57,7 @@ Every block may also carry:
 
 - `Origin`: `native` when the source declares the block's kind, level and boundaries (a docx style, an HTML tag, a tagged-PDF element, a PDF outline entry), `inferred` when the extractor deduced them from geometry or fonts. Absent in JSON means `native`. It does not cover the block's position in the reading order: a PDF image is `native` even though where it falls among the text is inferred.
 - `Hidden`: the reasons text in this block is not visible to a reader of the source. Absent in JSON means none was found. See [Hidden text](#hidden-text).
-- `Continued`: this block continues the last block of the same kind in the previous part, such as a paragraph split by a page break.
+- `Continued`: this block continues the nearest block of the same kind before it: the last one of the previous part, such as a paragraph split by a page break, or the one before it in the same part, such as a table too long for one block and split by rows. A continued table has the columns of the table it continues. The renderers run a continued block on to the one it continues.
 - `Loc`: where it came from. `BBox` for paged formats, `Range` (A1 notation) for sheets, `Offset`/`Length` for plain-text formats, `Anchor` for formats where the source itself names its blocks (a Word paragraph id, an HTML `id`, an e-book fragment). This is what lets a retrieval hit be cited.
 - `Spans`: inline bold/italic/link ranges over `Text` (optional), and the ranges that are hidden (always present when part of a block is hidden).
 - `Attrs`: format-specific key/values with no dedicated field.
@@ -94,7 +94,7 @@ Every block may also carry:
 3. Blocks are in reading order. Where the format does not declare order (PDF), order is the extractor's best inference.
 4. A top-level document has at least one part.
 5. `Part.Number` is the part's 1-based ordinal in the source. Numbers strictly increase but need not be contiguous: extracting pages 40–60 yields parts numbered 40 to 60.
-6. A block that runs across a part boundary is either assigned to the part where it starts or split, with `Continued` set on the later piece.
+6. A block that runs across a part boundary is either assigned to the part where it starts or split, with `Continued` set on the later piece. A table too large for one block is split by rows within its part, with `Continued` set on the later pieces.
 7. `Table` is set exactly on `table` blocks, `Image` exactly on `image` blocks.
 8. `Extract` is safe to call from many goroutines and honors context cancellation.
 9. Hidden text is extracted and flagged, never dropped. Every extractor calls `part.MarkHidden()` on each finished part and records in `Document.HiddenChecked` which reasons it fully checked.
@@ -114,13 +114,13 @@ if err := doc.Validate(); err != nil { t.Fatal(err) }
 - Text is in logical order, the order in which it is read and typed, also for right-to-left scripts. An extractor that cannot guarantee this for some input says so with a warning.
 - Soft line breaks inside a paragraph are joined with a single space. A `\n` in `Text` means a hard break.
 - End-of-line hyphenation is resolved only when the extractor is certain. Otherwise the hyphen stays and the lines are joined with no space: `inter-` + `national` gives `inter-national`, so a real compound such as `well-` + `known` comes out right.
-- Presentation-form ligatures (U+FB00 to U+FB06) are expanded to their letters.
+- **Ligature characters are written as their letters, everywhere.** The seven presentation-form ligatures U+FB00 to U+FB06 come out as `ff`, `fi`, `fl`, `ffi`, `ffl`, `st`, `st` in every piece of text a library extracts: block text, table cells, markers, part names, outline titles, alt text, and the title, subject, authors and keywords in the metadata. The output is for retrieval, and a search for "office" must find a document that spells it with U+FB01. Nothing wider is done: this is not compatibility normalization, and no other character is rewritten. Strings that identify or address something are left as the source has them: a link target, an image ID, an anchor, the source's file name. Use `Ligature`, `ExpandLigatures` or `AppendLigatures` from this package; no library keeps its own table.
 - No string contains a control character (NUL, form feed, carriage return, ...) other than `\n` and `\t`.
 - Block text is not empty and has no leading or trailing whitespace.
-- Code blocks are verbatim: the ligature and whitespace rules do not apply to them.
+- Code blocks that the source declares as code are verbatim: the ligature and whitespace rules do not apply to them, because there the character is what the author typed. Code that an extractor infers from layout (PDF) has no such claim, and its ligatures are expanded like any other text.
 - Unicode normalization form is not guaranteed (normalization is not in the standard library).
 
-`Validate` enforces the rules it can check mechanically: no control characters in any string, no unexpanded ligatures in block text or table cells, and trimmed non-empty block text.
+`Validate` enforces the rules it can check mechanically: no control characters in any string, no unexpanded ligatures in any of the text listed above (code blocks excepted), and trimmed non-empty block text.
 
 ### JSON
 
@@ -142,7 +142,7 @@ text.encode("utf-8")[span["start"]:span["end"]].decode("utf-8")
 
 ### Images
 
-`Image.ID` identifies the image resource, not the block. Equal IDs mean equal bytes, and several blocks may share one ID (a logo on every page). With `ImagesData`, the bytes are guaranteed only on the first block with a given ID in document order; repeats may omit them.
+Every image is a block unless the caller asks for none (`ImagesNone`): where a picture stands is context, its alternative text is text its author wrote, and a caller may want to look at the picture itself (`ImagesData`). `Image.ID` identifies the image resource, not the block. Equal IDs mean equal bytes, and several blocks may share one ID (a logo on every page). With `ImagesData`, the bytes are guaranteed only on the first block with a given ID in document order; repeats may omit them.
 
 ## Warnings
 
@@ -298,17 +298,17 @@ type Extractor interface {
 }
 ```
 
-`Options` (zero value: text and structure only, whole input, all CPUs):
+`Options` (zero value: text, structure and a block for every image, whole input, all CPUs):
 
 | Field | Purpose |
 |---|---|
 | `Workers` | Goroutines inside one document; 0 means all CPUs |
-| `Images` | `ImagesNone`, `ImagesMeta` (position and size), `ImagesData` (bytes too) |
+| `Images` | `ImagesMeta`, the default: a block for every image, with its place, size and alternative text. `ImagesData`: the bytes too. `ImagesNone`: no image blocks, and so no alternative text |
 | `Spans` | Ask for inline formatting and links |
 | `DeepHidden` | Also run the hidden-text checks that cost extra work (contrast against drawn backgrounds, occlusion, clipping) |
 | `Password` | Tried on encrypted input, and passed down to embedded documents |
 | `Parts` | `PartRange{First, Last}`, inclusive part numbers; zero value means all; a range that selects nothing is `ErrNoPartsSelected` |
-| `Limits` | `MaxInputBytes`, `MaxDecodedBytes`, `MaxParts`, `MaxDepth`. Zero means the extractor's default; negative means no limit |
+| `Limits` | `MaxInputBytes`, `MaxDecodedBytes`, `MaxTextBytes`, `MaxParts`, `MaxDepth`. Zero means the default; negative means no limit |
 | `Child` | Function that extracts embedded documents; see below |
 | `Name` | Recorded as `Source.Name` |
 
@@ -317,6 +317,33 @@ type Extractor interface {
 Extractors wrap these, so test with `errors.Is`: `ErrPasswordRequired`, `ErrWrongPassword`, `ErrUnsupported`, `ErrMalformed`, `ErrLimitExceeded`, `ErrNoPartsSelected`.
 
 `ErrLimitExceeded` means a limit stopped the extraction before there was anything to return. That is always so for `MaxInputBytes`, and it is so for any other limit reached before the input could even be identified (a decompression bomb in the part that says what the file is). A limit reached once there is a document truncates it and adds a `limit.exceeded` warning with severity `error`; an error is never returned together with a document. `MaxParts` returns the first `MaxParts` parts of the requested range, also where the part count is known up front.
+
+### How much text a file may become
+
+A file can be small and say a great deal: one long string that every cell of a sheet refers to, a form drawn on every page of a PDF. What is repeated is stored once, so `MaxDecodedBytes` does not see it, and the document that results writes the text out as often as it occurs. A workbook of 110 KB can become 2 GiB of text this way.
+
+`Limits.MaxTextBytes` bounds it: the text of blocks and the cells of tables, counted as often as they occur, in a document and the documents embedded in it together. The default is 256 MiB (`DefaultMaxTextBytes`). A part that reaches it is cut off there with `limit.exceeded`.
+
+Text outside blocks counts in the same way wherever the file decides both how long it is and how often it occurs: the titles of the outline, a part name that is put together for every part (a PDF page label with its prefix), list markers, link targets. An extractor may instead hold such a string to the length of a name and leave it uncounted: the number of blocks and parts, which the other limits bound, then bounds it. Metadata occurs once and is not counted.
+
+The outline is counted before the first part, and a part's name with the part, so that where a document is cut does not depend on the number of workers. When the budget is spent in the outline, the entries read so far are kept and the document carries `limit.exceeded`.
+
+An extractor counts with a `TextBudget`:
+
+```go
+ctx, budget := gofastcore.WithTextBudget(ctx, opts.Limits)
+defer budget.Close()
+...
+if !budget.Take(len(text)) {
+    // keep what there is, warn limit.exceeded on the part, stop reading
+}
+...
+opts.ExtractChild(ctx, name, mime, reader, size) // this ctx: the child shares the budget
+```
+
+The context carries the budget to the extractor of an embedded document, of whatever library: its `WithTextBudget` gives it no more than its parent has left, and its `Close` takes what it used from its parent. Embedded documents are extracted one after another, so the result does not depend on timing. An extractor that reads a document again from the start, to cut it at the same place whatever the number of workers, calls `Reset` first.
+
+The limit on decompressed bytes is shared in the same way, for the same reason turned around: each document's own count stops a bomb, and a document that embeds thousands of bombs, each just inside the limit, would cost thousands of limits. `WithDecodeBudget(ctx, opts.Limits, default)` gives the budget for one reading; before an embedded document is handed to `ExtractChild` the extractor sees to it that the budget says what the document has left (`Take`), and the child, reading within what it is given, takes what it used from its parent on `Close`.
 
 ### Embedded documents
 

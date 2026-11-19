@@ -36,6 +36,8 @@
 //     40-60 yields parts numbered 40 to 60.
 //   - A block that runs across a part boundary is either assigned to the
 //     part where it starts or split, with Continued set on the later piece.
+//     A table too large for one block is split by rows within its part,
+//     with Continued set on the later pieces.
 //   - Partial extraction returns a Document with warnings, not an error.
 //     Errors are for input that yields nothing usable.
 //   - Hidden text is extracted and flagged, never dropped; see Hidden.
@@ -60,13 +62,19 @@
 //     certain. Otherwise the hyphen stays and the lines are joined with
 //     no space: "inter-" + "national" gives "inter-national", so that a
 //     real compound such as "well-" + "known" comes out right.
-//   - Presentation-form ligatures (U+FB00 to U+FB06) are expanded to
-//     their letters.
+//   - Presentation-form ligatures (U+FB00 to U+FB06) are written as
+//     their letters in every piece of text: block text, table cells,
+//     markers, part names, outline titles, alt text and the metadata's
+//     title, subject, authors and keywords. The output is for retrieval.
+//     Nothing wider is rewritten, and strings that identify or address
+//     something (a link target, an image ID, an anchor, a file name) are
+//     left as the source has them. See Ligature and ExpandLigatures.
 //   - No string contains a control character (Unicode category Cc: NUL,
 //     form feed, carriage return, ...) other than "\n" and "\t".
 //   - Block text is not empty and has no leading or trailing whitespace.
-//   - Code blocks are verbatim: the ligature and whitespace rules do not
-//     apply to them.
+//   - Code blocks that the source declares as code are verbatim: the
+//     ligature and whitespace rules do not apply to them. Code that an
+//     extractor infers from layout has its ligatures expanded.
 //   - Unicode normalization form is not guaranteed.
 //
 // Document.Validate checks the mechanical parts of this contract and is

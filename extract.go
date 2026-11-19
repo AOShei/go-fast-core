@@ -67,7 +67,8 @@ type Options struct {
 	// already parallelize across documents should set 1.
 	Workers int
 
-	// Images selects how much image information to extract.
+	// Images selects how much image information to extract. The zero
+	// value is ImagesMeta: every image is a block.
 	Images ImageMode
 
 	// Spans asks for inline formatting and links in Block.Spans. Spans
@@ -123,13 +124,19 @@ type ChildFunc func(ctx context.Context, name, mime string, r io.ReaderAt, size 
 type ImageMode uint8
 
 const (
-	// ImagesNone emits no image blocks. Fastest. WarnPartImageOnly is
-	// still reported.
-	ImagesNone ImageMode = iota
-	// ImagesMeta emits image blocks with position and dimensions.
-	ImagesMeta
-	// ImagesData additionally fills Image.Data with the encoded bytes.
+	// ImagesMeta, the default, emits a block for every image, with what
+	// the source says of it: its place, its dimensions, its alternative
+	// text, and an ID by which the same image is known wherever it
+	// occurs. An image is content: where it stands gives context, and
+	// its alternative text is text its author wrote.
+	ImagesMeta ImageMode = iota
+	// ImagesData additionally fills Image.Data with the encoded bytes,
+	// for a caller that looks at the pictures.
 	ImagesData
+	// ImagesNone emits no image blocks: the alternative text of images
+	// is then not in the document. WarnPartImageOnly is still reported.
+	// For callers that want text only and know what they leave out.
+	ImagesNone
 )
 
 // PartRange selects parts by number, both ends inclusive. A zero First
@@ -154,6 +161,20 @@ type Limits struct {
 	// MaxDecodedBytes bounds the total bytes produced by decompression
 	// (zip members, PDF streams), the defense against decompression bombs.
 	MaxDecodedBytes int64
+	// MaxTextBytes bounds the text a document holds: the text of its
+	// blocks and the cells of its tables, each counted as often as it
+	// occurs, in the document and the documents embedded in it together.
+	// It is the defense against a small file that says a long text many
+	// times over (one string that every cell of a sheet refers to, a
+	// form drawn on every page), which the decompression limit does not
+	// see: what is repeated is stored once. Text outside blocks counts
+	// too where the file decides both its length and how often it
+	// occurs (outline titles, a name made for every part, list markers,
+	// link targets), unless the extractor holds it to the length of a
+	// name. When the limit is reached, the part being read is cut off
+	// there with WarnLimitExceeded. The default is DefaultMaxTextBytes.
+	// See TextBudget.
+	MaxTextBytes int64
 	// MaxParts bounds the number of parts extracted. When the input has
 	// more, the first MaxParts parts of the requested range are returned
 	// with WarnLimitExceeded, also where the count is known up front.
@@ -167,6 +188,12 @@ type Limits struct {
 // Limits.MaxDepth is zero: an attachment inside an archive inside an
 // email is depth 2.
 const DefaultMaxDepth = 4
+
+// DefaultMaxTextBytes is the text a document and the documents embedded
+// in it may hold when Limits.MaxTextBytes is zero. It is some ten times
+// the text of a workbook of two million cells or of a book of a million
+// and a half words.
+const DefaultMaxTextBytes = 256 << 20
 
 // ResolveLimit applies the Limits convention to one value: it returns def
 // when v is zero, the largest int64 when v is negative, and v otherwise.
@@ -205,6 +232,12 @@ func (o *Options) ExtractChild(ctx context.Context, name, mime string, r io.Read
 	}
 	if int64(o.Depth) >= ResolveLimit(int64(o.Limits.MaxDepth), DefaultMaxDepth) {
 		return stub(SeverityWarning, WarnChildNotExtracted, "depth limit reached")
+	}
+	if r == nil {
+		// Listed only: the extractor has no content to hand over, as
+		// when a limit stopped it first. The child extractor is never
+		// called without something to read.
+		return stub(SeverityWarning, WarnChildNotExtracted, "not read")
 	}
 	childOpts := *o
 	childOpts.Depth++

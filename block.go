@@ -48,10 +48,13 @@ type Block struct {
 	// extracted and flagged.
 	Hidden Hidden `json:"hidden,omitempty"`
 
-	// Continued marks a block that continues the last block of the same
-	// kind in the preceding part, e.g. the second half of a paragraph
-	// split by a page break. Optional: an extractor that cannot tell
-	// leaves it false.
+	// Continued marks a block that continues the nearest block of the
+	// same kind before it: the last one of the preceding part, as with
+	// the second half of a paragraph split by a page break, or the one
+	// before it in the same part, as with a table too long for one block
+	// and split by rows. A continued table has the columns of the table
+	// it continues; its HeaderRows count only header rows it repeats.
+	// Optional: an extractor that cannot tell leaves it false.
 	Continued bool `json:"continued,omitempty"`
 
 	// Ordered applies to list items.

@@ -721,3 +721,256 @@ func TestSharedCodesAreDistinct(t *testing.T) {
 		seen[c] = true
 	}
 }
+
+func TestLigatures(t *testing.T) {
+	for in, want := range map[string]string{
+		"":          "",
+		"plain":     "plain",
+		"o\ufb03ce": "office",
+		"\ufb00\ufb01\ufb02\ufb03\ufb04\ufb05\ufb06": "fffiflffifflstst",
+		"caf\u00e9 \ufb01n":                          "caf\u00e9 fin",
+		"\ufb07 \uff01 \ufaff":                       "\ufb07 \uff01 \ufaff", // neighbours are left alone
+		"cut \xef\xac":                               "cut \xef\xac",
+	} {
+		if got := ExpandLigatures(in); got != want {
+			t.Errorf("ExpandLigatures(%q) = %q, want %q", in, got, want)
+		}
+		if got := string(AppendLigatures([]byte("x"), []byte(in))); got != "x"+want {
+			t.Errorf("AppendLigatures(%q) = %q, want %q", in, got, "x"+want)
+		}
+	}
+	if Ligature('\ufb01') != "fi" || Ligature('\ufb06') != "st" || Ligature('f') != "" || Ligature('\ufb07') != "" {
+		t.Error("Ligature gives the wrong letters")
+	}
+	if n := testing.AllocsPerRun(100, func() { ExpandLigatures("nothing to do here, caf\u00e9") }); n != 0 {
+		t.Errorf("ExpandLigatures allocates %v times for a string with no ligature", n)
+	}
+}
+
+// Ligatures are rejected in every string that is text to be read, and
+// allowed in the ones that identify or address something.
+func TestValidateLigaturesEverywhere(t *testing.T) {
+	base := func() *Document {
+		d := New("test")
+		d.HiddenChecked = HiddenChars
+		p := Part{Kind: PartBody, Number: 1, Blocks: []Block{{Kind: KindListItem, Level: 1, Text: "x"}}}
+		p.MarkHidden()
+		d.Parts = []Part{p}
+		return d
+	}
+	if err := base().Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for name, set := range map[string]func(*Document){
+		"marker":    func(d *Document) { d.Parts[0].Blocks[0].Marker = "\ufb01." },
+		"part name": func(d *Document) { d.Parts[0].Name = "O\ufb03ce" },
+		"title":     func(d *Document) { d.Metadata.Title = "\ufb02ow" },
+		"subject":   func(d *Document) { d.Metadata.Subject = "\ufb02ow" },
+		"author":    func(d *Document) { d.Metadata.Authors = []string{"Stau\ufb00er"} },
+		"keyword":   func(d *Document) { d.Metadata.Keywords = []string{"\ufb01sh"} },
+		"alt text": func(d *Document) {
+			d.Parts[0].Blocks = append(d.Parts[0].Blocks, Block{Kind: KindImage, Text: "a \ufb01sh", Image: &Image{ID: "i"}})
+		},
+	} {
+		d := base()
+		set(d)
+		if d.Validate() == nil {
+			t.Errorf("%s: a ligature was accepted", name)
+		}
+	}
+	d := base()
+	d.Source.Name = "o\ufb03ce.pdf"
+	d.Parts[0].Blocks[0].Loc.Anchor = "\ufb01g1"
+	d.Parts[0].Blocks[0].Spans = []Span{{Start: 0, End: 1, Href: "https://example.com/\ufb01"}}
+	d.Parts[0].Blocks = append(d.Parts[0].Blocks, Block{Kind: KindImage, Image: &Image{ID: "\ufb01g.png"}})
+	if err := d.Validate(); err != nil {
+		t.Errorf("a ligature in an identifier or address was rejected: %v", err)
+	}
+}
+
+// A table too long for one block is split by rows, and the later pieces
+// say that they continue it: within a part, or over a part boundary. The
+// renderers run them on as rows of one table where the columns match.
+func TestContinuedTablesAreJoined(t *testing.T) {
+	table := func(header int, continued bool, rows ...[]string) Block {
+		return Block{Kind: KindTable, Continued: continued, Table: &Table{HeaderRows: header, Rows: rows}}
+	}
+	d := New("xlsx")
+	d.HiddenChecked = HiddenChars
+	d.Parts = []Part{
+		{Kind: PartSheet, Number: 1, Name: "Data", Blocks: []Block{
+			table(1, false, []string{"Region", "Total"}, []string{"North", "10"}),
+			table(0, true, []string{"South", "20"}, []string{"East", "30"}),
+			{Kind: KindParagraph, Text: "A note between."},
+			table(0, true, []string{"not", "joined: a paragraph came between"}),
+			table(0, true, []string{"three", "columns", "here"}),
+		}},
+		{Kind: PartSheet, Number: 2, Name: "More", Blocks: []Block{
+			table(0, true, []string{"West", "40", "over the part boundary"}),
+		}},
+	}
+	if err := d.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	wantText := "Region\tTotal\nNorth\t10\nSouth\t20\nEast\t30\n\nA note between.\n\n" +
+		"not\tjoined: a paragraph came between\n\nthree\tcolumns\there\nWest\t40\tover the part boundary\n"
+	if got := d.Text(); got != wantText {
+		t.Errorf("Text() = %q, want %q", got, wantText)
+	}
+	wantMD := "| Region | Total |\n| --- | --- |\n| North | 10 |\n| South | 20 |\n| East | 30 |\n\nA note between.\n\n" +
+		"|  |  |\n| --- | --- |\n| not | joined: a paragraph came between |\n\n" +
+		"|  |  |  |\n| --- | --- | --- |\n| three | columns | here |\n| West | 40 | over the part boundary |\n"
+	if got := d.Markdown(); got != wantMD {
+		t.Errorf("Markdown() = %q, want %q", got, wantMD)
+	}
+	// With part markers a piece stays in its own part, as a table.
+	var sb strings.Builder
+	d.WriteMarkdown(&sb, &RenderOptions{PartMarkers: true})
+	if !strings.Contains(sb.String(), "<!-- sheet 2: More -->\n\n|  |  |  |\n| --- | --- | --- |\n| West |") {
+		t.Errorf("part markers should separate continued tables: %q", sb.String())
+	}
+}
+
+// Every image is a block unless the caller asks for none: the zero value
+// of Options asks for image blocks.
+func TestImagesAreExtractedByDefault(t *testing.T) {
+	var opts Options
+	if opts.Images != ImagesMeta || ImagesMeta == ImagesNone || ImagesData == ImagesNone || ImagesMeta == ImagesData {
+		t.Errorf("zero value of Options.Images is %d; ImagesMeta %d, ImagesData %d, ImagesNone %d", opts.Images, ImagesMeta, ImagesData, ImagesNone)
+	}
+}
+
+func TestTextBudget(t *testing.T) {
+	ctx := context.Background()
+	// The default, a limit, and none.
+	if _, b := WithTextBudget(ctx, Limits{}); b.Left() != DefaultMaxTextBytes {
+		t.Errorf("default budget %d", b.Left())
+	}
+	if _, b := WithTextBudget(ctx, Limits{MaxTextBytes: -1}); !b.Take(1<<30) || !b.Take(1<<30) || b.Spent() {
+		t.Error("a negative limit is no limit")
+	}
+	var none *TextBudget
+	if !none.Take(1<<30) || none.Spent() {
+		t.Error("a nil budget has no limit")
+	}
+	none.Reset()
+	none.Close()
+	if TextBudgetFrom(ctx) != nil {
+		t.Error("a context without a budget")
+	}
+
+	ctx, doc := WithTextBudget(ctx, Limits{MaxTextBytes: 100})
+	if TextBudgetFrom(ctx) != doc {
+		t.Error("the context does not carry the budget")
+	}
+	if !doc.Take(60) || doc.Left() != 40 || doc.Spent() {
+		t.Errorf("after 60 of 100: %d left", doc.Left())
+	}
+	// An embedded document has what its parent has left, however much it
+	// asks for, and what it uses is its parent's too.
+	childCtx, child := WithTextBudget(ctx, Limits{MaxTextBytes: 1000})
+	if child.Left() != 40 {
+		t.Errorf("a child of a document with 40 left has %d", child.Left())
+	}
+	if !child.Take(30) {
+		t.Error("30 of 40")
+	}
+	// And its own children in turn.
+	_, grandchild := WithTextBudget(childCtx, Limits{})
+	if grandchild.Left() != 10 || !grandchild.Take(10) || grandchild.Take(1) || !grandchild.Spent() {
+		t.Errorf("a grandchild: %d left", grandchild.Left())
+	}
+	grandchild.Close()
+	grandchild.Close() // once only
+	if child.Left() != 0 {
+		t.Errorf("after the grandchild used 10: the child has %d", child.Left())
+	}
+	child.Close()
+	if doc.Left() != 0 || doc.Spent() {
+		t.Errorf("after the child used all 40: the document has %d", doc.Left())
+	}
+	if doc.Take(1) || !doc.Spent() {
+		t.Error("nothing is left to take")
+	}
+	// A smaller limit of its own holds a child to less than is left.
+	ctx, doc = WithTextBudget(context.Background(), Limits{MaxTextBytes: 100})
+	_, child = WithTextBudget(ctx, Limits{MaxTextBytes: 7})
+	if child.Left() != 7 {
+		t.Errorf("a child limited to 7 has %d", child.Left())
+	}
+	// A part read again gives back what it took the first time.
+	if doc.Take(20); doc.Left() != 80 {
+		t.Errorf("after 20 of 100: %d", doc.Left())
+	}
+	if doc.Return(20); doc.Left() != 100 {
+		t.Errorf("after giving 20 back: %d", doc.Left())
+	}
+	// Reading again from the start gives everything back.
+	doc.Take(500)
+	doc.Reset()
+	if doc.Left() != 100 || doc.Spent() {
+		t.Errorf("after a reset: %d", doc.Left())
+	}
+	// A child of a document with nothing left has nothing.
+	doc.Take(500)
+	if _, child := WithTextBudget(ctx, Limits{}); child.Left() != 0 || child.Take(1) {
+		t.Errorf("a child of a spent document has %d", child.Left())
+	}
+}
+
+func TestDecodeBudget(t *testing.T) {
+	ctx := context.Background()
+	if _, d := WithDecodeBudget(ctx, Limits{}, 1000); d.Left() != 1000 {
+		t.Errorf("an extractor's default of 1000: %d", d.Left())
+	}
+	if _, d := WithDecodeBudget(ctx, Limits{MaxDecodedBytes: -1}, 1000); !d.Take(1 << 50) {
+		t.Error("a negative limit is no limit")
+	}
+	var none *DecodeBudget
+	if !none.Take(1<<50) || DecodeBudgetFrom(ctx) != nil {
+		t.Error("a nil budget has no limit, and a plain context carries none")
+	}
+	none.Close()
+
+	ctx, doc := WithDecodeBudget(ctx, Limits{MaxDecodedBytes: 100}, 1000)
+	if DecodeBudgetFrom(ctx) != doc || !doc.Take(30) || doc.Left() != 70 {
+		t.Errorf("after 30 of 100: %d left", doc.Left())
+	}
+	// An embedded document has what its parent has left, and what it
+	// decompresses is its parent's too. The text budget is another count.
+	_, child := WithDecodeBudget(ctx, Limits{}, 1000)
+	if child.Left() != 70 || !child.Take(50) {
+		t.Errorf("a child of a document with 70 left has %d", child.Left())
+	}
+	child.Close()
+	child.Close()
+	if doc.Left() != 20 {
+		t.Errorf("after the child used 50: %d", doc.Left())
+	}
+	if _, text := WithTextBudget(ctx, Limits{}); text.Left() != DefaultMaxTextBytes {
+		t.Errorf("the text budget of a context with a decode budget: %d", text.Left())
+	}
+	// A child that asks for more than there is has used all it was given.
+	_, child = WithDecodeBudget(ctx, Limits{}, 1000)
+	if child.Take(500) {
+		t.Error("500 of 20")
+	}
+	child.Close()
+	if doc.Left() != 0 || doc.Take(1) {
+		t.Errorf("after a child used everything: %d", doc.Left())
+	}
+}
+
+// An extractor that only lists an embedded file passes no reader. The
+// child extractor is not called for it.
+func TestExtractChildWithNothingToRead(t *testing.T) {
+	called := false
+	opts := &Options{Child: func(ctx context.Context, name, mime string, r io.ReaderAt, size int64, o *Options) (*Document, error) {
+		called = true
+		return New("x"), nil
+	}}
+	doc := opts.ExtractChild(context.Background(), "a.bin", "application/octet-stream", nil, 42)
+	if called || len(doc.Parts) != 0 || len(doc.Warnings) != 1 || doc.Warnings[0].Code != WarnChildNotExtracted || doc.Source.Name != "a.bin" || doc.Source.Size != 42 {
+		t.Errorf("called %v; document %+v", called, doc)
+	}
+}

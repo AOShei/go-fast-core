@@ -10,8 +10,8 @@ import (
 
 // Validate checks that the document obeys the model's structural contract
 // and the mechanical text conventions (valid UTF-8, no control characters,
-// no unexpanded ligatures, trimmed non-empty block text) and returns every
-// violation found, joined with errors.Join.
+// no unexpanded ligatures in text, trimmed non-empty block text) and
+// returns every violation found, joined with errors.Join.
 //
 // It is a check on producers. It walks the whole document, so call it from
 // tests rather than on the hot path, and it rejects the Unknown enum
@@ -63,9 +63,18 @@ func (v *validator) text(where, s string) {
 	}
 }
 
-func (v *validator) texts(where string, ss []string) {
+// words checks a string that is text to be read (a name, a title, a
+// label), as opposed to an identifier or an address: besides what every
+// string obeys, its ligatures are expanded.
+func (v *validator) words(where, s string) {
+	if p := textProblem(s, true, false); p != "" {
+		v.bad("%s %s", where, p)
+	}
+}
+
+func (v *validator) wordsEach(where string, ss []string) {
 	for i, s := range ss {
-		v.text(fmt.Sprintf("%s[%d]", where, i), s)
+		v.words(fmt.Sprintf("%s[%d]", where, i), s)
 	}
 }
 
@@ -116,16 +125,16 @@ func (v *validator) document(d *Document, path string, top bool) {
 	}
 
 	m := &d.Metadata
-	v.text("metadata.title", m.Title)
-	v.texts("metadata.authors", m.Authors)
-	v.text("metadata.subject", m.Subject)
-	v.texts("metadata.keywords", m.Keywords)
+	v.words("metadata.title", m.Title)
+	v.wordsEach("metadata.authors", m.Authors)
+	v.words("metadata.subject", m.Subject)
+	v.wordsEach("metadata.keywords", m.Keywords)
 	v.text("metadata.language", m.Language)
 	v.text("metadata.application", m.Application)
 	v.textMap("metadata.extra", m.Extra)
 
 	for i, o := range d.Outline {
-		v.text(fmt.Sprintf("outline[%d].title", i), o.Title)
+		v.words(fmt.Sprintf("outline[%d].title", i), o.Title)
 		if o.Level < 1 {
 			v.bad("outline[%d]: level %d is below 1", i, o.Level)
 		}
@@ -156,7 +165,7 @@ func (v *validator) document(d *Document, path string, top bool) {
 		if p.Width < 0 || p.Height < 0 {
 			v.bad("%s: negative size", pp)
 		}
-		v.text(pp+".name", p.Name)
+		v.words(pp+".name", p.Name)
 		v.warnings(pp+".warnings", p.Warnings)
 		if p.Blocks == nil {
 			v.bad("%s: blocks is nil; call Part.MarkHidden, so that JSON has [] and not null", pp)
@@ -206,7 +215,7 @@ func (v *validator) block(b *Block, bp string) {
 	if b.Text == "" && b.Kind != KindTable && b.Kind != KindImage {
 		v.bad("%s: %s block has empty text", bp, b.Kind)
 	}
-	v.text(bp+".marker", b.Marker)
+	v.words(bp+".marker", b.Marker)
 	v.textMap(bp+".attrs", b.Attrs)
 	if !b.Hidden.Valid() {
 		v.bad("%s: invalid hidden reasons %#x", bp, uint16(b.Hidden))

@@ -89,6 +89,7 @@ type renderer struct {
 	md   bool
 	any  bool // something has been written
 	prev Kind // kind of the last block written; KindInvalid after a marker
+	cols int  // columns of the last table written
 }
 
 func (r *renderer) finish() error {
@@ -160,10 +161,13 @@ func (r *renderer) block(b *Block) {
 	if r.skip(b) {
 		return
 	}
-	joined := b.Continued && b.Kind == r.prev && joinable(b.Kind)
+	// A continued table is run on to the one before it if it has the
+	// same columns: its rows follow as rows of that table.
+	table := b.Kind == KindTable
+	joined := b.Continued && b.Kind == r.prev && (joinable(b.Kind) || table && len(b.Table.Rows[0]) == r.cols)
 	switch {
 	case !r.any:
-	case joined && !r.md:
+	case joined && !r.md && !table:
 		r.w.WriteByte(' ')
 	case joined, r.prev == KindListItem && b.Kind == KindListItem:
 		// A single newline keeps a Markdown paragraph, quote or list going.
@@ -177,6 +181,9 @@ func (r *renderer) block(b *Block) {
 		r.plain(b, joined)
 	}
 	r.any, r.prev = true, b.Kind
+	if table {
+		r.cols = len(b.Table.Rows[0])
+	}
 }
 
 func (r *renderer) markdown(b *Block, joined bool) {
@@ -227,7 +234,7 @@ func (r *renderer) markdown(b *Block, joined bool) {
 		w.WriteString(fence)
 
 	case KindTable:
-		r.markdownTable(b.Table)
+		r.markdownTable(b.Table, joined)
 
 	case KindImage:
 		w.WriteString("![")
@@ -310,7 +317,7 @@ func escapeLine(line string) string {
 	return s
 }
 
-func (r *renderer) markdownTable(t *Table) {
+func (r *renderer) markdownTable(t *Table, joined bool) {
 	w := r.w
 	cols := len(t.Rows[0])
 	writeRow := func(row []string) {
@@ -322,6 +329,16 @@ func (r *renderer) markdownTable(t *Table) {
 			}
 			w.WriteString(" |")
 		}
+	}
+	// The rows of a continued table carry on the table before it.
+	if joined {
+		for i, row := range t.Rows {
+			if i > 0 {
+				w.WriteByte('\n')
+			}
+			writeRow(row)
+		}
+		return
 	}
 	// Markdown tables need exactly one header row. With no declared
 	// header an empty one is emitted so that data is not mislabeled; with
