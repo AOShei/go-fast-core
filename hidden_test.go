@@ -404,9 +404,32 @@ func TestContrast(t *testing.T) {
 		{"black on black", 0, 0, 0, 0, 0, 0, true},
 		{"white on navy", 255, 255, 255, 0, 0, 128, false},
 		{"grey on white", 0x77, 0x77, 0x77, 255, 255, 255, false},
+		// Equally bright and plain to tell apart: the ratio alone would
+		// flag these (1.06, 1.08).
+		{"green on red", 0, 138, 0, 230, 0, 0, false},
+		{"red on green", 230, 0, 0, 0, 138, 0, false},
+		{"orange on cyan", 255, 150, 0, 0, 200, 255, false},
+		// A difference in blue alone does not make text legible.
+		{"yellow on white", 255, 255, 0, 255, 255, 255, true},
+		{"cream on white", 255, 255, 222, 255, 255, 255, true},
+		{"navy on black", 0, 0, 90, 0, 0, 0, true},
+		// Close in color as well as in brightness.
+		{"pale yellow on white", 255, 255, 230, 255, 255, 255, true},
+		{"dark grey on black", 18, 18, 18, 0, 0, 0, true},
+		{"red on nearly the same red", 230, 0, 0, 225, 10, 5, true},
 	} {
 		if got := LowContrast(c.r, c.g, c.b, c.br, c.bg, c.bb); got != c.indiscernible {
 			t.Errorf("%s: LowContrast = %v (ratio %.3f)", c.name, got, ContrastRatio(c.r, c.g, c.b, c.br, c.bg, c.bb))
+		}
+	}
+	// The bound on color takes nothing away from gray on gray: every
+	// pair of grays below the ratio is within it.
+	for a := 0; a < 256; a++ {
+		for b := 0; b < 256; b++ {
+			byRatio := ContrastRatio(uint8(a), uint8(a), uint8(a), uint8(b), uint8(b), uint8(b)) < HiddenContrastRatio
+			if got := LowContrast(uint8(a), uint8(a), uint8(a), uint8(b), uint8(b), uint8(b)); got != byRatio {
+				t.Fatalf("gray %d on gray %d: LowContrast = %v, by the ratio alone %v", a, b, got, byRatio)
+			}
 		}
 	}
 }

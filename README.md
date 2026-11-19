@@ -210,7 +210,7 @@ The go-fast libraries do not decide which it is. They **extract hidden text like
 | `invisible` | The source marks the text as not displayed: PDF invisible render mode or a layer that is off; Word hidden-text formatting; a hidden slide, sheet, row or column; HTML `display:none`, `visibility:hidden`, `hidden` |
 | `text_layer` | Unpainted text lying within an image that covers at least half of its page (`HiddenTextLayerCoverage`), which is how a scanned page's searchable text is stored. Nothing verifies that it matches the image. It stands alone: see below |
 | `tiny` | Displayed smaller than 2 points (`HiddenTinySize`) |
-| `low_contrast` | Text color indistinguishable from what is behind it: WCAG contrast ratio under 1.2 (`HiddenContrastRatio`, `LowContrast`) |
+| `low_contrast` | Text color indistinguishable from what is behind it: WCAG contrast ratio under 1.2 (`HiddenContrastRatio`) and neither red nor green more than 32 of 255 apart (`HiddenColorDistance`), which is what `LowContrast` tests. The ratio compares brightness alone: green on red of the same brightness is in plain view and is not flagged. A difference in blue alone does not make text legible, so yellow or cream on white is flagged |
 | `off_page` | Positioned outside the visible area of the page, slide or viewport |
 | `clipped` | Outside a clipping region, including a box too small to show the text with overflow cut off |
 | `occluded` | Covered by an image or a filled shape |
@@ -286,7 +286,7 @@ Exclusion cuts exactly the flagged ranges, so smuggled invisible characters are 
 2. Never merge hidden text into a visible block without marking the range.
 3. Call `part.MarkHidden()` once per finished part, including a failed or blank one. It runs the invisible-character scan, copies `Part.Hidden` to the blocks, adds the `text.hidden` warning and makes an empty blocks list non-nil. `Validate` fails if it was skipped.
 4. Set `doc.HiddenChecked` to the reasons you checked completely in this run, always including `HiddenChars`. List a reason only if its full check ran: one that depends on `Options.DeepHidden` is listed only when that option was set and the check exists.
-5. Cheap checks always run. Checks that need extra work (knowing what is drawn behind or over the text) run when `Options.DeepHidden` is set. Document which is which.
+5. Cheap checks always run. Checks that need extra work (knowing what is drawn behind or over the text) run when `Options.DeepHidden` is set. Document which is which. A run with `DeepHidden` knows more, and may also take back a flag that the cheap check gives: go-fast-pdf's cheap contrast check takes text drawn on an unpainted page for text on white, and its deep check sees when a background is painted around that text afterwards.
 6. Metadata strings cannot carry a block flag. If `InvisibleChars` finds something in one, add a document-level `text.hidden` warning.
 
 ## Extractor interface

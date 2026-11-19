@@ -148,13 +148,34 @@ const (
 	// HiddenLowContrast. Identical colors have ratio 1; #EEEEEE on white
 	// is 1.16 and is flagged, #DDDDDD on white is 1.36 and is not.
 	HiddenContrastRatio = 1.2
+
+	// HiddenColorDistance is how far apart, of 255, the red or the green
+	// of text and background may be for the text to be HiddenLowContrast.
+	// The contrast ratio compares brightness alone, and two colors can be
+	// equally bright and plain to tell apart: green (0, 138, 0) on red
+	// (230, 0, 0) has ratio 1.06 and is in plain view. No two grays with
+	// a ratio below HiddenContrastRatio are further apart than 26, so
+	// this bound takes nothing away from gray on gray.
+	//
+	// Blue has no bound. It adds little to brightness, and the eye does
+	// not resolve a difference in blue alone at the width of a letter's
+	// stroke: yellow on white (ratio 1.07) and cream on white are hard or
+	// impossible to read and stay flagged.
+	HiddenColorDistance = 32
 )
 
 // LowContrast reports whether text of one 8-bit sRGB color is
-// indistinguishable from a background of another, i.e. whether their
-// WCAG contrast ratio is below HiddenContrastRatio.
+// indistinguishable from a background of another: their WCAG contrast
+// ratio is below HiddenContrastRatio, and neither their red nor their
+// green components differ by more than HiddenColorDistance.
 func LowContrast(textR, textG, textB, backR, backG, backB uint8) bool {
-	return ContrastRatio(textR, textG, textB, backR, backG, backB) < HiddenContrastRatio
+	return colorsNear(textR, backR) && colorsNear(textG, backG) &&
+		ContrastRatio(textR, textG, textB, backR, backG, backB) < HiddenContrastRatio
+}
+
+func colorsNear(a, b uint8) bool {
+	d := int(a) - int(b)
+	return d <= HiddenColorDistance && d >= -HiddenColorDistance
 }
 
 // ContrastRatio returns the WCAG 2 contrast ratio of two 8-bit sRGB
