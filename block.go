@@ -15,7 +15,7 @@ package gofastcore
 //	KindCaption      caption text         -               -
 //	KindFootnote     note text            -               Marker
 //	KindFormula      LaTeX or plain text  -               -
-//	KindNote         speaker note/comment -               Attrs: type, author, date
+//	KindNote         note, comment, list  -               Attrs: type, author, date
 //	KindHeader       running header       -               -
 //	KindFooter       running footer       -               -
 //
@@ -170,6 +170,18 @@ const (
 	// ("HYPERLINK ...", "MERGEFIELD Name"). It follows its paragraph and is
 	// flagged HiddenInvisible: the instruction is never shown.
 	NoteField = "field"
+	// NoteChoices is the list of values a control offers to choose from:
+	// the drop-down of a spreadsheet cell (a data validation list), a
+	// drop-down form field or content control, the options of a PDF choice
+	// field. Its Text is the values, one per line, in the source's order.
+	// A list the source takes from cells elsewhere is given as the
+	// reference to them ("=Lists!$A$1:$A$12"), since the values are
+	// already in the text where those cells are. It follows the block of
+	// the control, or for a sheet stands at the place of the cells it is
+	// for (Loc.Range), with the control's name in Attrs[AttrField] where
+	// the source names it. The values are shown to a reader who opens the
+	// list, so the block is not flagged hidden for that alone.
+	NoteChoices = "choices"
 )
 
 // Location pins a block to its place in the source so that a retrieval hit

@@ -51,7 +51,7 @@ A block has a `Kind`, usually `Text`, and kind-specific fields:
 | `caption` | caption text | | |
 | `footnote` | note text | | `Marker` |
 | `formula` | LaTeX, UnicodeMath or plain text | | `Attrs["notation"]`: `latex`, `unicodemath`, `plain` |
-| `note` | speaker note, comment, or text removed by a tracked change | | `Attrs`: `type`, `author`, `date` |
+| `note` | speaker note, comment, text removed by a tracked change, field instruction, or the values of a drop-down list | | `Attrs`: `type`, `author`, `date`, `field` |
 | `header`, `footer` | running page header/footer | | |
 
 Every block may also carry:
@@ -74,6 +74,7 @@ Every block may also carry:
   | `deletion` | Text removed by a tracked change. The document's text is given as if the change were accepted; the removed text is kept here |
   | `speaker` | The speaker's notes of a slide |
   | `field` | The instruction of a field whose result is in the text (`HYPERLINK ...`, `MERGEFIELD Name`); flagged `invisible`, since it is never shown |
+  | `choices` | The values a control offers to choose from (a spreadsheet cell's drop-down, a drop-down form field or content control, a PDF choice field), one per line in the source's order. A list taken from cells elsewhere is given as the reference to them (`=Lists!$A$1:$A$12`), since those values are already in the text. It follows the control's block, or on a sheet stands at the cells it is for (`Loc.Range`), with the control's name in `field` where the source names one. Not flagged hidden for that alone: a reader who opens the list sees the values |
 
   `author` and `date` are as the source gives them.
 - **A table's cells can say more than their text** (`Table.Cells`, an entry only for a cell that has something): where the cell links to (`href`, with `Spans`), the formula whose result it shows (`formula`, never evaluated), and the type of the value it stores with the value where the text does not show it in full (`type`: `number`, `date`, `bool`, `error`, `text`; `value`), both with `Options.Cells`. The renderers write the links, never formulas or values: a formula can hold text nobody sees on the sheet.
@@ -373,9 +374,9 @@ doc.Children = append(doc.Children, opts.ExtractChild(ctx, name, mime, reader, s
 | Format | Part kind | Notes |
 |---|---|---|
 | pdf | `page` | `BBox` on blocks; structure is `inferred` unless the PDF is tagged or the outline confirms a heading |
-| docx, odt, rtf | one `body` | Heading styles and outline levels give levels; numbered headings and list items carry `Marker`; comments and tracked deletions become `note`; `Loc.Anchor` is the paragraph id |
+| docx, odt, rtf | one `body` | Heading styles and outline levels give levels; numbered headings and list items carry `Marker`; comments, tracked deletions, field instructions and the values of drop-down controls become `note`; `Loc.Anchor` is the paragraph id |
 | pptx, odp | `slide` | `Name` is the slide title; speaker notes become `note` |
-| xlsx, ods, csv | `sheet` | `Name` is the sheet name; each used region is a `table` with `Loc.Range` |
+| xlsx, ods, csv | `sheet` | `Name` is the sheet name; each used region is a `table` with `Loc.Range`; drop-down lists become `note` blocks of type `choices`; defined names and macro sheets go to the `stored` part |
 | html, md, txt | one `body` | `Loc.Offset`/`Length` into the source; `Loc.Anchor` from `id` attributes |
 | epub | `chapter` | One per spine item; nav becomes `Outline` |
 | eml, msg, mbox | `message` | Headers in `Metadata.Extra`; attachments in `Children` |
