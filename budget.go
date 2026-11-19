@@ -15,7 +15,8 @@ import (
 // it occurs. The budget is what bounds that.
 //
 // An extractor gets the budget of the document it is reading from
-// WithTextBudget, takes from it the bytes of every block text and table
+// WithTextBudget, takes from it BlockCost and the bytes of the text of every
+// block, CellCost and the bytes of every table
 // cell it produces, and when Take reports false stops reading the part,
 // keeps what it has and raises WarnLimitExceeded there. It calls Close
 // when the document is done.

@@ -3,6 +3,9 @@ package gofastcore
 import (
 	"bytes"
 	"context"
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -972,5 +975,139 @@ func TestExtractChildWithNothingToRead(t *testing.T) {
 	doc := opts.ExtractChild(context.Background(), "a.bin", "application/octet-stream", nil, 42)
 	if called || len(doc.Parts) != 0 || len(doc.Warnings) != 1 || doc.Warnings[0].Code != WarnChildNotExtracted || doc.Source.Name != "a.bin" || doc.Source.Size != 42 {
 		t.Errorf("called %v; document %+v", called, doc)
+	}
+}
+
+// Links are written as Markdown links, in text and in table cells, and
+// survive the removal of hidden passages. Plain text is unchanged.
+func TestMarkdownLinks(t *testing.T) {
+	text := "See the [annual] report or the site. Hidden. Done."
+	at := func(s string) (int, int) { i := strings.Index(text, s); return i, i + len(s) }
+	r0, r1 := at("the [annual] report")
+	s0, s1 := at("site")
+	h0, h1 := at(" Hidden.")
+	d := New("x")
+	d.Parts = append(d.Parts, Part{Kind: PartBody, Number: 1, Blocks: []Block{
+		{Kind: KindParagraph, Text: text, Hidden: HiddenInvisible, Spans: []Span{
+			// One link in two spans, bold in the middle.
+			{Start: r0, End: r0 + 4, Href: "https://example.org/a report (2026)"},
+			{Start: r0 + 4, End: r1, Style: StyleBold, Href: "https://example.org/a report (2026)"},
+			{Start: s0, End: s1, Href: "https://example.org/<x>"},
+			{Start: h0, End: h1, Hidden: HiddenInvisible},
+		}},
+		{Kind: KindHeading, Level: 1, Text: "Heading link", Spans: []Span{{Start: 8, End: 12, Href: "#top"}}},
+		{Kind: KindTable, Table: &Table{HeaderRows: 1, Rows: [][]string{{"Name", "Site"}, {"Ada", "a|b"}},
+			Cells: []CellDetail{{Row: 1, Col: 1, Href: "https://example.org/a|b", Formula: "HYPERLINK(\"x\")", Type: CellText}}}},
+	}})
+	d.HiddenChecked = HiddenChars
+	d.Parts[0].MarkHidden()
+	if err := d.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	var md strings.Builder
+	if err := d.WriteMarkdown(&md, nil); err != nil {
+		t.Fatal(err)
+	}
+	want := "See [the \\[annual\\] report](<https://example.org/a report (2026)>) or the [site](<https://example.org/%3Cx%3E>). Hidden. Done.\n\n" +
+		"# Heading [link](<#top>)\n\n" +
+		"| Name | Site |\n| --- | --- |\n| Ada | [a\\|b](<https://example.org/a%7Cb>) |\n"
+	if md.String() != want {
+		t.Errorf("markdown:\n%s\nwant:\n%s", md.String(), want)
+	}
+	md.Reset()
+	d.WriteMarkdown(&md, &RenderOptions{ExcludeHidden: HiddenAny})
+	if got := strings.SplitN(md.String(), "\n", 2)[0]; got != "See [the \\[annual\\] report](<https://example.org/a report (2026)>) or the [site](<https://example.org/%3Cx%3E>). Done." {
+		t.Errorf("without hidden text: %q", got)
+	}
+	if got := d.Text(); !strings.HasPrefix(got, text+"\n") || strings.Contains(got, "](") || strings.Contains(got, "HYPERLINK") {
+		t.Errorf("plain text: %q", got)
+	}
+}
+
+// Table.Cells is checked: in the table, in order, saying something, a
+// value only with a type.
+func TestValidateCellDetails(t *testing.T) {
+	check := func(cells []CellDetail) error {
+		d := New("x")
+		d.Parts = append(d.Parts, Part{Kind: PartSheet, Number: 1, Blocks: []Block{
+			{Kind: KindTable, Table: &Table{Rows: [][]string{{"1", "2"}, {"3", "4"}}, Cells: cells}}}})
+		d.HiddenChecked = HiddenChars
+		return d.Validate()
+	}
+	if err := check([]CellDetail{{Row: 0, Col: 1, Formula: "A1*2", Type: CellNumber, Value: "2.0000001"}, {Row: 1, Col: 0, Href: "#x"}}); err != nil {
+		t.Errorf("valid details: %v", err)
+	}
+	for name, cells := range map[string][]CellDetail{
+		"outside":         {{Row: 2, Col: 0, Href: "#x"}},
+		"out of order":    {{Row: 1, Col: 0, Href: "#x"}, {Row: 0, Col: 1, Href: "#y"}},
+		"twice":           {{Row: 0, Col: 0, Href: "#x"}, {Row: 0, Col: 0, Formula: "1"}},
+		"nothing":         {{Row: 0, Col: 0}},
+		"value, no type":  {{Row: 0, Col: 0, Value: "1"}},
+		"unknown type":    {{Row: 0, Col: 0, Type: CellUnknown}},
+		"control in href": {{Row: 0, Col: 0, Href: "a\x01b"}},
+	} {
+		if check(cells) == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	// Types are written by name, and a name this version does not know is
+	// kept as unknown.
+	b, _ := json.Marshal(CellDetail{Row: 1, Col: 2, Type: CellDate, Value: "45720.5"})
+	if string(b) != `{"row":1,"col":2,"type":"date","value":"45720.5"}` {
+		t.Errorf("json %s", b)
+	}
+	var c CellDetail
+	if err := json.Unmarshal([]byte(`{"row":0,"col":0,"type":"currency"}`), &c); err != nil || c.Type != CellUnknown {
+		t.Errorf("unknown type: %v %v", c.Type, err)
+	}
+}
+
+// A stored part is the last and is hidden.
+func TestValidateStoredPart(t *testing.T) {
+	doc := func(parts ...Part) *Document {
+		d := New("x")
+		d.Parts, d.HiddenChecked = parts, HiddenChars
+		for i := range d.Parts {
+			d.Parts[i].MarkHidden()
+		}
+		return d
+	}
+	body := Part{Kind: PartBody, Number: 1, Blocks: []Block{{Kind: KindParagraph, Text: "x"}}}
+	stored := Part{Kind: PartStored, Number: 2, Hidden: HiddenInvisible,
+		Blocks: []Block{{Kind: KindCode, Text: "Sub Auto_Open()", Attrs: map[string]string{AttrStored: StoredMacro}}}}
+	if err := doc(body, stored).Validate(); err != nil {
+		t.Errorf("valid: %v", err)
+	}
+	notLast := stored
+	notLast.Number = 0
+	if doc(notLast, Part{Kind: PartBody, Number: 3, Blocks: []Block{}}).Validate() == nil {
+		t.Error("a stored part before another was accepted")
+	}
+	shown := stored
+	shown.Hidden = 0
+	shown.Blocks = []Block{{Kind: KindCode, Text: "x"}}
+	if doc(body, shown).Validate() == nil {
+		t.Error("a stored part that is not hidden was accepted")
+	}
+	if b, _ := json.Marshal(PartStored); string(b) != `"stored"` {
+		t.Errorf("json %s", b)
+	}
+}
+
+// A child that wants a key it was not given is listed as encrypted, and
+// a child gets the keys of its parent.
+func TestExtractChildKeys(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []crypto.Decrypter
+	opts := &Options{Keys: []crypto.Decrypter{key}, Child: func(ctx context.Context, name, mime string, r io.ReaderAt, size int64, o *Options) (*Document, error) {
+		got = o.Keys
+		return nil, fmt.Errorf("x: %w", ErrKeyRequired)
+	}}
+	doc := opts.ExtractChild(context.Background(), "a.docx", "", strings.NewReader("x"), 1)
+	if len(got) != 1 || got[0] != key || len(doc.Warnings) != 1 || doc.Warnings[0].Code != WarnChildEncrypted {
+		t.Errorf("keys %v; warnings %+v", got, doc.Warnings)
 	}
 }

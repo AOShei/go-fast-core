@@ -2,6 +2,7 @@ package gofastcore
 
 import (
 	"context"
+	"crypto"
 	"errors"
 	"io"
 	"math"
@@ -37,6 +38,9 @@ var (
 	// ErrWrongPassword: the input is encrypted and the password given does
 	// not open it.
 	ErrWrongPassword = errors.New("gofastcore: wrong password")
+	// ErrKeyRequired: the input is encrypted for a certificate and no key
+	// in Options.Keys matches a recipient it names.
+	ErrKeyRequired = errors.New("gofastcore: private key required")
 	// ErrUnsupported: the input is valid but uses a feature or variant the
 	// extractor does not implement.
 	ErrUnsupported = errors.New("gofastcore: unsupported input")
@@ -87,6 +91,20 @@ type Options struct {
 	// embedded documents, which is what opens an encrypted attachment of
 	// an unencrypted email.
 	Password string
+
+	// Keys are private keys tried on input encrypted for a certificate
+	// (an Office file encrypted for a certificate, a PDF with the
+	// public-key security handler): the key whose public half matches a
+	// recipient the file names is used. A crypto.Decrypter may keep its
+	// key in hardware or in another process. Passed down to embedded
+	// documents, as Password is.
+	Keys []crypto.Decrypter
+
+	// Cells asks for the formulas of table cells, and the type and the
+	// stored value of a cell where its displayed text does not show the
+	// value in full, in Table.Cells. On a sheet of numbers that is an
+	// entry for every cell, so it is not given unless asked for.
+	Cells bool
 
 	// Parts restricts extraction to a range of part numbers. The zero
 	// value extracts every part. A range that selects nothing is
@@ -163,7 +181,8 @@ type Limits struct {
 	MaxDecodedBytes int64
 	// MaxTextBytes bounds the text a document holds: the text of its
 	// blocks and the cells of its tables, each counted as often as it
-	// occurs, in the document and the documents embedded in it together.
+	// occurs, in the document and the documents embedded in it together,
+	// and BlockCost for every block and CellCost for every cell besides.
 	// It is the defense against a small file that says a long text many
 	// times over (one string that every cell of a sheet refers to, a
 	// form drawn on every page), which the decompression limit does not
@@ -195,6 +214,21 @@ const DefaultMaxDepth = 4
 // and a half words.
 const DefaultMaxTextBytes = 256 << 20
 
+// BlockCost and CellCost are what a block, and a cell of a table, take
+// from the text budget (Limits.MaxTextBytes) beyond their text. A file
+// decides how many blocks and cells there are as freely as it decides how
+// long a string is: a PDF page that draws one image a hundred thousand
+// times needs six bytes of content for each, and a sheet can have a grid
+// of empty cells. BlockCost is about what a block takes written down with
+// no text (in the PDF corpus, a document's JSON is 157 bytes a block
+// beyond its text); CellCost is what a cell takes in memory, more than it
+// takes in JSON. At the default limit a document has at most two million
+// blocks.
+const (
+	BlockCost = 128
+	CellCost  = 16
+)
+
 // ResolveLimit applies the Limits convention to one value: it returns def
 // when v is zero, the largest int64 when v is negative, and v otherwise.
 func ResolveLimit(v, def int64) int64 {
@@ -216,7 +250,7 @@ func ResolveLimit(v, def int64) int64 {
 //
 //	WarnChildNotExtracted  no ChildFunc was supplied, or the depth limit was reached
 //	WarnChildUnsupported   the ChildFunc returned ErrUnsupported
-//	WarnChildEncrypted     the ChildFunc returned ErrPasswordRequired or ErrWrongPassword
+//	WarnChildEncrypted     the ChildFunc returned ErrPasswordRequired, ErrWrongPassword or ErrKeyRequired
 //	WarnChildFailed        the ChildFunc returned any other error
 //
 // ExtractChild may be called on a nil *Options.
@@ -248,7 +282,7 @@ func (o *Options) ExtractChild(ctx context.Context, name, mime string, r io.Read
 	case err == nil:
 	case errors.Is(err, ErrUnsupported):
 		return stub(SeverityWarning, WarnChildUnsupported, err.Error())
-	case errors.Is(err, ErrPasswordRequired), errors.Is(err, ErrWrongPassword):
+	case errors.Is(err, ErrPasswordRequired), errors.Is(err, ErrWrongPassword), errors.Is(err, ErrKeyRequired):
 		return stub(SeverityError, WarnChildEncrypted, err.Error())
 	default:
 		return stub(SeverityError, WarnChildFailed, err.Error())

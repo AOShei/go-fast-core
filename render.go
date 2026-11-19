@@ -3,6 +3,7 @@ package gofastcore
 import (
 	"bufio"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -46,7 +47,9 @@ func (d *Document) Text() string {
 //
 // Text that would be read as Markdown structure at the start of a line
 // ("# ", "> ", "- ", "1. ") is escaped, so a paragraph stays a paragraph.
-// Inline characters are not escaped, and Spans are not rendered.
+// Inline characters are not escaped. Of Spans, links are rendered, as
+// [text](<address>), and so are the links of table cells; formatting is
+// not.
 func (d *Document) WriteMarkdown(w io.Writer, opts *RenderOptions) error {
 	return d.render(w, opts, true)
 }
@@ -90,6 +93,9 @@ type renderer struct {
 	any  bool // something has been written
 	prev Kind // kind of the last block written; KindInvalid after a marker
 	cols int  // columns of the last table written
+	// linked is the text of the block being written with its links as
+	// Markdown links, or "" if it has none.
+	linked string
 }
 
 func (r *renderer) finish() error {
@@ -146,6 +152,12 @@ func joinable(k Kind) bool {
 }
 
 func (r *renderer) block(b *Block) {
+	r.linked = ""
+	if r.md && b.Kind != KindCode && b.Kind != KindFormula && b.Kind != KindImage {
+		// Links are written into the text before hidden passages are taken
+		// out of it, since their places are in the text as it is.
+		r.linked, _ = linkedText(b, r.opts.ExcludeHidden)
+	}
 	if exclude := r.opts.ExcludeHidden; b.Hidden&exclude != 0 {
 		if b.HiddenWhole()&exclude != 0 {
 			return
@@ -188,6 +200,12 @@ func (r *renderer) block(b *Block) {
 
 func (r *renderer) markdown(b *Block, joined bool) {
 	w := r.w
+	if r.linked != "" {
+		// Its text with its links written as links.
+		c := *b
+		c.Text = r.linked
+		b = &c
+	}
 	switch b.Kind {
 	case KindHeading:
 		w.WriteString(strings.Repeat("#", min(max(int(b.Level), 1), 6)))
@@ -320,43 +338,62 @@ func escapeLine(line string) string {
 func (r *renderer) markdownTable(t *Table, joined bool) {
 	w := r.w
 	cols := len(t.Rows[0])
-	writeRow := func(row []string) {
+	var links map[[2]int]string
+	for _, c := range t.Cells {
+		if c.Href != "" {
+			if links == nil {
+				links = map[[2]int]string{}
+			}
+			links[[2]int{c.Row, c.Col}] = c.Href
+		}
+	}
+	// row is the place of the row in t.Rows; -1 for an empty header.
+	writeRow := func(row int) {
 		w.WriteByte('|')
 		for c := range cols {
 			w.WriteByte(' ')
-			if c < len(row) {
-				w.WriteString(markdownCell(row[c]))
+			if row >= 0 && c < len(t.Rows[row]) {
+				text := t.Rows[row][c]
+				if href, ok := links[[2]int{row, c}]; ok && text != "" {
+					w.WriteByte('[')
+					w.WriteString(markdownCell(linkTextEscaper.Replace(text)))
+					w.WriteString("](")
+					w.WriteString(linkDestination(href, true))
+					w.WriteByte(')')
+				} else {
+					w.WriteString(markdownCell(text))
+				}
 			}
 			w.WriteString(" |")
 		}
 	}
 	// The rows of a continued table carry on the table before it.
 	if joined {
-		for i, row := range t.Rows {
+		for i := range t.Rows {
 			if i > 0 {
 				w.WriteByte('\n')
 			}
-			writeRow(row)
+			writeRow(i)
 		}
 		return
 	}
 	// Markdown tables need exactly one header row. With no declared
 	// header an empty one is emitted so that data is not mislabeled; with
 	// several, the extra header rows follow as ordinary rows.
-	body := t.Rows
+	first := 0
 	if t.HeaderRows > 0 {
-		writeRow(t.Rows[0])
-		body = t.Rows[1:]
+		writeRow(0)
+		first = 1
 	} else {
-		writeRow(nil)
+		writeRow(-1)
 	}
 	w.WriteString("\n|")
 	for range cols {
 		w.WriteString(" --- |")
 	}
-	for _, row := range body {
+	for i := first; i < len(t.Rows); i++ {
 		w.WriteByte('\n')
-		writeRow(row)
+		writeRow(i)
 	}
 }
 
@@ -433,4 +470,123 @@ func oneLine(s string) string {
 		return s
 	}
 	return strings.Join(strings.Fields(s), " ")
+}
+
+// linkTextEscaper escapes what would end the text of a Markdown link early.
+var linkTextEscaper = strings.NewReplacer(`\`, `\\`, "[", `\[`, "]", `\]`)
+
+// linkDestination writes an address as the destination of a Markdown
+// link, in angle brackets so that spaces and parentheses in it survive.
+// In a table, a bar would end the cell, and is written as %7C.
+func linkDestination(href string, inTable bool) string {
+	var sb strings.Builder
+	sb.WriteByte('<')
+	for _, c := range href {
+		switch {
+		case c == '<':
+			sb.WriteString("%3C")
+		case c == '>':
+			sb.WriteString("%3E")
+		case c == '\\':
+			sb.WriteString(`\\`)
+		case c == '|' && inTable:
+			sb.WriteString("%7C")
+		case c == '\n' || c == '\r':
+			sb.WriteString("%0A")
+		default:
+			sb.WriteRune(c)
+		}
+	}
+	sb.WriteByte('>')
+	return sb.String()
+}
+
+// linkedText returns the text of b with its links written as Markdown
+// links and the passages hidden for a reason in exclude left out, as
+// VisibleText leaves them out. It returns "" and false if b has no link.
+func linkedText(b *Block, exclude Hidden) (string, bool) {
+	type link struct {
+		from, to int
+		href     string
+	}
+	var links []link
+	for _, s := range b.Spans {
+		if s.Href == "" || s.Start < 0 || s.Start >= s.End || s.End > len(b.Text) {
+			continue
+		}
+		if n := len(links); n > 0 && links[n-1].href == s.Href && s.Start <= links[n-1].to {
+			links[n-1].to = max(links[n-1].to, s.End) // one link, in several spans
+			continue
+		}
+		links = append(links, link{s.Start, s.End, s.Href})
+	}
+	if len(links) == 0 {
+		return "", false
+	}
+	slices.SortStableFunc(links, func(a, c link) int { return a.from - c.from })
+	var cuts [][2]int
+	if b.Hidden&exclude != 0 {
+		if b.HiddenWhole()&exclude != 0 {
+			return "", false
+		}
+		for _, s := range b.Spans {
+			if s.Hidden&exclude != 0 && s.Start >= 0 && s.Start < s.End && s.End <= len(b.Text) {
+				cuts = append(cuts, [2]int{s.Start, s.End})
+			}
+		}
+	}
+	hidden := func(at int) bool {
+		for _, c := range cuts {
+			if at >= c[0] && at < c[1] {
+				return true
+			}
+		}
+		return false
+	}
+	var sb strings.Builder
+	open, li := false, 0
+	keep := func(piece string, inLink bool) {
+		if inLink {
+			piece = linkTextEscaper.Replace(strings.ReplaceAll(piece, "\n", " "))
+		}
+		// Do not leave a double space where a hidden passage was removed.
+		if strings.HasPrefix(piece, " ") && strings.HasSuffix(sb.String(), " ") {
+			piece = piece[1:]
+		}
+		sb.WriteString(piece)
+	}
+	// The text is walked from one boundary of a link or a hidden passage
+	// to the next.
+	bounds := []int{0, len(b.Text)}
+	for _, l := range links {
+		bounds = append(bounds, l.from, l.to)
+	}
+	for _, c := range cuts {
+		bounds = append(bounds, c[0], c[1])
+	}
+	slices.Sort(bounds)
+	bounds = slices.Compact(bounds)
+	for i := 0; i+1 < len(bounds); i++ {
+		from, to := bounds[i], bounds[i+1]
+		for li < len(links) && links[li].to <= from {
+			if open {
+				sb.WriteString("](" + linkDestination(links[li].href, false) + ")")
+				open = false
+			}
+			li++
+		}
+		inLink := li < len(links) && links[li].from <= from && from < links[li].to
+		if hidden(from) {
+			continue
+		}
+		if inLink && !open {
+			sb.WriteByte('[')
+			open = true
+		}
+		keep(b.Text[from:to], inLink)
+	}
+	if open {
+		sb.WriteString("](" + linkDestination(links[li].href, false) + ")")
+	}
+	return strings.TrimSpace(sb.String()), true
 }

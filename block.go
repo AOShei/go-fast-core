@@ -102,6 +102,57 @@ const (
 	AttrLevel = "level"
 	// AttrLanguage is the programming language of a KindCode block.
 	AttrLanguage = "language"
+	// AttrName is the name the source gives a table, a pivot table or a
+	// chart ("SalesTable").
+	AttrName = "name"
+	// AttrRole says what a table block stands for when it is not a grid
+	// of cells the source shows as such: one of the Role* values.
+	AttrRole = "role"
+	// AttrChart is the type of a chart, lowercase as the source names it
+	// ("bar", "line", "pie", "scatter").
+	AttrChart = "chart"
+	// AttrAxisX and AttrAxisY are the titles of a chart's axes.
+	AttrAxisX = "x_axis"
+	AttrAxisY = "y_axis"
+	// AttrStored says what kind of stored, never-shown data a block is:
+	// one of the Stored* values. Such a block is flagged HiddenInvisible.
+	AttrStored = "stored"
+	// AttrNotation is the notation of a KindFormula block: one of the
+	// Notation* values.
+	AttrNotation = "notation"
+	// AttrField is the name the source gives the form field or control
+	// whose value the block is (a PDF form field, a Word form field or
+	// content control).
+	AttrField = "field"
+)
+
+// Values of Attrs[AttrRole].
+const (
+	// RoleChart: the table is the data of a chart, as the chart's source
+	// stores it. A chart's title is a KindCaption block before it.
+	RoleChart = "chart"
+	// RolePivot: the table is a pivot table.
+	RolePivot = "pivot"
+)
+
+// Values of Attrs[AttrStored].
+const (
+	StoredPivotCache       = "pivot_cache"
+	StoredDefinedName      = "defined_name"
+	StoredDocumentVariable = "document_variable"
+	StoredCustomXML        = "custom_xml"
+	StoredFieldCode        = "field_code"
+	StoredMacro            = "macro"
+	// StoredFormField: a field of a form that is shown on no page, such as
+	// a PDF form field with no widget.
+	StoredFormField = "form_field"
+)
+
+// Values of Attrs[AttrNotation].
+const (
+	NotationLaTeX       = "latex"
+	NotationUnicodeMath = "unicodemath" // the linear form Word uses
+	NotationPlain       = "plain"
 )
 
 // Values of Attrs[AttrNoteType].
@@ -115,6 +166,10 @@ const (
 	NoteDeletion = "deletion"
 	// NoteSpeaker is the speaker's notes of a slide.
 	NoteSpeaker = "speaker"
+	// NoteField is the instruction of a field whose result is in the text
+	// ("HYPERLINK ...", "MERGEFIELD Name"). It follows its paragraph and is
+	// flagged HiddenInvisible: the instruction is never shown.
+	NoteField = "field"
 )
 
 // Location pins a block to its place in the source so that a retrieval hit
@@ -182,6 +237,31 @@ type Table struct {
 	// is: a hidden row or column, a cell with white text. Every reason
 	// here is also in Block.Hidden.
 	Hidden []HiddenCells `json:"hidden,omitempty"`
+	// Cells holds what some cells have besides the text they display, in
+	// order of row, then column; a cell with nothing more has no entry.
+	// Links come with Options.Spans; formulas, types and stored values
+	// with Options.Cells. Everything here counts against
+	// Limits.MaxTextBytes. The renderers write links, never formulas or
+	// values: a formula can hold text that nobody sees on the sheet.
+	Cells []CellDetail `json:"cells,omitempty"`
+}
+
+// CellDetail is what one cell of a table holds besides its displayed
+// text.
+type CellDetail struct {
+	Row int `json:"row"`
+	Col int `json:"col"`
+	// Href is where the cell links to: an address, or "#place" inside the
+	// document.
+	Href string `json:"href,omitempty"`
+	// Formula is the formula whose result the cell displays, as the
+	// source writes it, without a leading "=". It is never evaluated.
+	Formula string `json:"formula,omitempty"`
+	// Type is the kind of value the cell stores. Value is that value
+	// where the displayed text does not show it in full: a number its
+	// format rounds, a date's serial number. Value is set only with Type.
+	Type  CellType `json:"type,omitempty"`
+	Value string   `json:"value,omitempty"`
 }
 
 // Merge is a merged cell region. Row and Col are 0-based; RowSpan and

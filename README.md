@@ -29,7 +29,8 @@ Document
 ├── Metadata    title, authors, dates, language, extra
 ├── Outline[]   the source's own table of contents (PDF bookmarks, epub nav)
 ├── HiddenChecked  which hidden-text checks ran
-├── Parts[]     the format's natural unit: page, slide, sheet, chapter, message, body
+├── Parts[]     the format's natural unit: page, slide, sheet, chapter, message, body;
+│   │           and, last, what the file stores and shows nowhere (stored)
 │   ├── Blocks[]    content in reading order
 │   └── Warnings[]  what went wrong in this part
 ├── Children[]  embedded documents (attachments, archive members), each a full Document
@@ -43,13 +44,13 @@ A block has a `Kind`, usually `Text`, and kind-specific fields:
 | `heading` | heading text | 1–6 | `Marker` for a numbered heading; `Attrs["level"]` if the source level is deeper than 6 |
 | `paragraph` | paragraph text | | |
 | `list_item` | item text without the marker | nesting depth, from 1 | `Ordered`, `Marker` |
-| `table` | empty | | `Table` (rows of cell strings, header row count, merges) |
+| `table` | empty | | `Table` (rows of cell strings, header row count, merges, details of cells); `Attrs`: `name`, `role` (`chart`, `pivot`), for a chart `chart`, `x_axis`, `y_axis` |
 | `image` | alt text or description | | `Image` (id, MIME, pixel size, optional bytes) |
 | `code` | verbatim code | | `Attrs["language"]` |
 | `quote` | quoted text | nesting depth, from 1 | |
 | `caption` | caption text | | |
 | `footnote` | note text | | `Marker` |
-| `formula` | LaTeX or plain text | | |
+| `formula` | LaTeX, UnicodeMath or plain text | | `Attrs["notation"]`: `latex`, `unicodemath`, `plain` |
 | `note` | speaker note, comment, or text removed by a tracked change | | `Attrs`: `type`, `author`, `date` |
 | `header`, `footer` | running page header/footer | | |
 
@@ -72,15 +73,19 @@ Every block may also carry:
   | `comment` | A reviewer's comment or annotation attached to the content |
   | `deletion` | Text removed by a tracked change. The document's text is given as if the change were accepted; the removed text is kept here |
   | `speaker` | The speaker's notes of a slide |
+  | `field` | The instruction of a field whose result is in the text (`HYPERLINK ...`, `MERGEFIELD Name`); flagged `invisible`, since it is never shown |
 
   `author` and `date` are as the source gives them.
+- **A table's cells can say more than their text** (`Table.Cells`, an entry only for a cell that has something): where the cell links to (`href`, with `Spans`), the formula whose result it shows (`formula`, never evaluated), and the type of the value it stores with the value where the text does not show it in full (`type`: `number`, `date`, `bool`, `error`, `text`; `value`), both with `Options.Cells`. The renderers write the links, never formulas or values: a formula can hold text nobody sees on the sheet.
+- **Data the file stores and never shows** is read as data, never run, evaluated or followed, and flagged `invisible`, with `Attrs["stored"]` saying what it is: `pivot_cache` (the records of a pivot table whose source is gone), `defined_name`, `document_variable`, `custom_xml`, `field_code`, `macro`, `form_field` (a field of a form shown on no page). Nobody who opens the file sees it, so it is a place to put text for a model. What belongs to the file and to no page, sheet or slide goes in a part of kind `stored`: at most one, the last, with `Part.Hidden` `invisible`; `Options.Parts` selects it only with the whole document, and a reader that gives parts one at a time gives it last.
+- **The value of a form field or control** that its own appearance does not show (a PDF form field, a Word form field or content control) is a block at its place, with the field's name in `Attrs["field"]` (`AttrField`).
 - **Heading levels are 1 to 6.** A source with deeper levels (Word has nine) has them clamped to 6, with the real level in `Attrs["level"]`, and the part carries the `structure.heading_level_clamped` warning at severity `info`. Levels above six are not allowed because Markdown has none.
 
 ### Design decisions
 
 - **Flat blocks, no section tree.** Hierarchy is implied by heading levels. Extractors emit in one pass and page workers stay independent.
 - **Parts are self-contained.** A part owns its blocks and its warnings. A page worker fills one `Part` with no shared state and no locking, and a part handed on by itself is complete.
-- **Structure first, Markdown derived.** `Markdown()` and `Text()` render the blocks. Extractors never emit Markdown strings.
+- **Structure first, Markdown derived.** `Markdown()` and `Text()` render the blocks. Extractors never emit Markdown strings. `Markdown()` writes links, of text and of table cells, as `[text](<address>)`; other inline formatting is not rendered, and `Text()` has no links.
 - **Provenance, not confidence.** `Origin` says whether structure was declared or guessed. There is no numeric score: heuristics do not produce calibrated probabilities. A consumer that needs certainty treats `inferred` blocks as plain text and chunks by size.
 - **Tables are `[][]string`.** Merged cells put their text top-left and are listed in `Merges`. Numbers appear as the source displays them: thousands separators, decimals, percent and currency signs as formatted.
 - **Dates and times stored as values are written in ISO 8601**, whatever the display format: `2026-03-04`, `2026-03-04T14:30:00`, `14:30:00`. This is the one exception to "as displayed", and it applies where the source holds a date as a value with a display format beside it (a spreadsheet cell), not to dates written as text. The reason is that `03/04/2026` means two different days depending on where the file was made, and the file does not always say. The exception standardises and loses nothing: every component the value holds is kept, so a cell with a time of day keeps it, and a fraction of a second is kept where there is one.
@@ -179,7 +184,7 @@ Shared codes (constants `Warn*`):
 | `limit.exceeded` | A limit was reached during extraction; the output is truncated there |
 | `child.not_extracted` | An embedded document is listed but was not extracted |
 | `child.unsupported` | No extractor handles the embedded document's format, or it uses an unimplemented feature |
-| `child.encrypted` | The embedded document is encrypted and was not opened (no password, or the wrong one) |
+| `child.encrypted` | The embedded document is encrypted and was not opened (no password, the wrong one, or no key for the certificate it is encrypted for) |
 | `child.failed` | Extraction of an embedded document failed for any other reason |
 
 An extractor may add codes of its own under a format prefix, such as `pdf.xref_rebuilt`.
@@ -207,7 +212,7 @@ The go-fast libraries do not decide which it is. They **extract hidden text like
 
 | Reason | Meaning |
 |---|---|
-| `invisible` | The source marks the text as not displayed: PDF invisible render mode or a layer that is off; Word hidden-text formatting; a hidden slide, sheet, row or column; HTML `display:none`, `visibility:hidden`, `hidden` |
+| `invisible` | The source marks the text as not displayed: PDF invisible render mode or a layer that is off; Word hidden-text formatting; a hidden slide, sheet, row or column; HTML `display:none`, `visibility:hidden`, `hidden`. Also data the file stores and never displays (`Attrs["stored"]`) |
 | `text_layer` | Unpainted text lying within an image that covers at least half of its page (`HiddenTextLayerCoverage`), which is how a scanned page's searchable text is stored. Nothing verifies that it matches the image. It stands alone: see below |
 | `tiny` | Displayed smaller than 2 points (`HiddenTinySize`) |
 | `low_contrast` | Text color indistinguishable from what is behind it: WCAG contrast ratio under 1.2 (`HiddenContrastRatio`) and neither red nor green more than 32 of 255 apart (`HiddenColorDistance`), which is what `LowContrast` tests. The ratio compares brightness alone: green on red of the same brightness is in plain view and is not flagged. A difference in blue alone does not make text legible, so yellow or cream on white is flagged |
@@ -307,6 +312,8 @@ type Extractor interface {
 | `Spans` | Ask for inline formatting and links |
 | `DeepHidden` | Also run the hidden-text checks that cost extra work (contrast against drawn backgrounds, occlusion, clipping) |
 | `Password` | Tried on encrypted input, and passed down to embedded documents |
+| `Keys` | Private keys (`crypto.Decrypter`) tried on input encrypted for a certificate: the one whose public half matches a recipient the file names. Passed down like `Password` |
+| `Cells` | Ask for the formulas, types and stored values of table cells in `Table.Cells` |
 | `Parts` | `PartRange{First, Last}`, inclusive part numbers; zero value means all; a range that selects nothing is `ErrNoPartsSelected` |
 | `Limits` | `MaxInputBytes`, `MaxDecodedBytes`, `MaxTextBytes`, `MaxParts`, `MaxDepth`. Zero means the default; negative means no limit |
 | `Child` | Function that extracts embedded documents; see below |
@@ -314,7 +321,7 @@ type Extractor interface {
 
 ### Errors
 
-Extractors wrap these, so test with `errors.Is`: `ErrPasswordRequired`, `ErrWrongPassword`, `ErrUnsupported`, `ErrMalformed`, `ErrLimitExceeded`, `ErrNoPartsSelected`.
+Extractors wrap these, so test with `errors.Is`: `ErrPasswordRequired`, `ErrWrongPassword`, `ErrKeyRequired`, `ErrUnsupported`, `ErrMalformed`, `ErrLimitExceeded`, `ErrNoPartsSelected`.
 
 `ErrLimitExceeded` means a limit stopped the extraction before there was anything to return. That is always so for `MaxInputBytes`, and it is so for any other limit reached before the input could even be identified (a decompression bomb in the part that says what the file is). A limit reached once there is a document truncates it and adds a `limit.exceeded` warning with severity `error`; an error is never returned together with a document. `MaxParts` returns the first `MaxParts` parts of the requested range, also where the part count is known up front.
 
@@ -324,7 +331,9 @@ A file can be small and say a great deal: one long string that every cell of a s
 
 `Limits.MaxTextBytes` bounds it: the text of blocks and the cells of tables, counted as often as they occur, in a document and the documents embedded in it together. The default is 256 MiB (`DefaultMaxTextBytes`). A part that reaches it is cut off there with `limit.exceeded`.
 
-Text outside blocks counts in the same way wherever the file decides both how long it is and how often it occurs: the titles of the outline, a part name that is put together for every part (a PDF page label with its prefix), list markers, link targets. An extractor may instead hold such a string to the length of a name and leave it uncounted: the number of blocks and parts, which the other limits bound, then bounds it. Metadata occurs once and is not counted.
+Every block takes `BlockCost` (128) bytes from the budget beyond its text, and every cell of a table `CellCost` (16) beyond its text, empty cells included: a file decides how many blocks and cells there are as freely as it decides how long a string is. A PDF page that draws one image 100,000 times needs six bytes of content for each; the 300,000 image blocks of 1.8 MB of content held 189 MB. `BlockCost` is about what a block takes written down with no text; `CellCost` is what a cell takes in memory. At the default limit a document has at most two million blocks.
+
+Text outside blocks counts in the same way wherever the file decides both how long it is and how often it occurs: the titles of the outline, a part name that is put together for every part (a PDF page label with its prefix), list markers, link targets, the details of table cells. An extractor may instead hold such a string to the length of a name and leave it uncounted: the number of blocks and parts, which the other limits bound, then bounds it. Metadata occurs once and is not counted.
 
 The outline is counted before the first part, and a part's name with the part, so that where a document is cut does not depend on the number of workers. When the budget is spent in the outline, the entries read so far are kept and the document carries `limit.exceeded`.
 
@@ -334,7 +343,7 @@ An extractor counts with a `TextBudget`:
 ctx, budget := gofastcore.WithTextBudget(ctx, opts.Limits)
 defer budget.Close()
 ...
-if !budget.Take(len(text)) {
+if !budget.Take(gofastcore.BlockCost + len(text)) {
     // keep what there is, warn limit.exceeded on the part, stop reading
 }
 ...

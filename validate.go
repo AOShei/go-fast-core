@@ -162,6 +162,14 @@ func (v *validator) document(d *Document, path string, top bool) {
 			v.bad("%s: number %d does not increase (previous %d)", pp, p.Number, last)
 		}
 		last = max(last, p.Number)
+		if p.Kind == PartStored {
+			if i != len(d.Parts)-1 {
+				v.bad("%s: a stored part must be the last part", pp)
+			}
+			if p.Hidden&HiddenInvisible == 0 {
+				v.bad("%s: a stored part must be hidden (HiddenInvisible): nothing in it is shown", pp)
+			}
+		}
 		if p.Width < 0 || p.Height < 0 {
 			v.bad("%s: negative size", pp)
 		}
@@ -320,6 +328,29 @@ func (v *validator) table(t *Table, bp string) {
 				v.bad("%s.table[%d][%d] %s", bp, r, c, p)
 			}
 		}
+	}
+	prev := [2]int{-1, -1}
+	for k, c := range t.Cells {
+		cp := fmt.Sprintf("%s.table.cells[%d]", bp, k)
+		if c.Row < 0 || c.Col < 0 || c.Row >= len(t.Rows) || c.Col >= cols {
+			v.bad("%s: cell (%d,%d) outside the table", cp, c.Row, c.Col)
+		}
+		if c.Row < prev[0] || c.Row == prev[0] && c.Col <= prev[1] {
+			v.bad("%s: cells not in order of row, then column, or a cell twice", cp)
+		}
+		prev = [2]int{c.Row, c.Col}
+		if c.Href == "" && c.Formula == "" && c.Type == CellUnset {
+			v.bad("%s: an entry that says nothing", cp)
+		}
+		if c.Type != CellUnset && !c.Type.Valid() {
+			v.bad("%s: invalid type %d", cp, c.Type)
+		}
+		if c.Value != "" && c.Type == CellUnset {
+			v.bad("%s: a value without a type", cp)
+		}
+		v.text(cp+".href", c.Href)
+		v.text(cp+".formula", c.Formula) // verbatim, as the source writes it
+		v.text(cp+".value", c.Value)
 	}
 	if t.HeaderRows < 0 || t.HeaderRows > len(t.Rows) {
 		v.bad("%s: header_rows %d outside 0-%d", bp, t.HeaderRows, len(t.Rows))

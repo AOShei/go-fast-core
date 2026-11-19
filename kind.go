@@ -100,6 +100,14 @@ const (
 	PartSheet   // xlsx, ods, xls, csv
 	PartChapter // epub
 	PartMessage // eml, msg; one per message in an mbox
+	// PartStored holds what belongs to the file as a whole and to no
+	// page, sheet or slide, and is shown on none: macro code, document
+	// variables, custom XML data, defined names. A document has at most
+	// one, after its other parts and numbered after them; its Hidden is
+	// HiddenInvisible, so every block in it is flagged. Options.Parts
+	// selects it only with the whole document (the zero range); a reader
+	// that gives parts one at a time gives it last, after the others.
+	PartStored
 	partEnd
 )
 
@@ -112,6 +120,7 @@ var partNames = [...]string{
 	PartSheet:   "sheet",
 	PartChapter: "chapter",
 	PartMessage: "message",
+	PartStored:  "stored",
 }
 
 // Valid reports whether k is a part kind an extractor may emit.
@@ -283,6 +292,61 @@ func (s *Style) UnmarshalText(b []byte) error {
 				*s |= 1 << i
 				break
 			}
+		}
+	}
+	return nil
+}
+
+// CellType is the kind of value a table cell stores (CellDetail.Type).
+type CellType uint8
+
+const (
+	// CellUnset: the type is not given.
+	CellUnset CellType = iota
+	// CellUnknown is a cell type this version of the package does not
+	// know.
+	CellUnknown
+	CellNumber
+	CellDate
+	CellBool
+	CellError
+	CellText
+	cellEnd
+)
+
+var cellNames = [...]string{
+	CellUnset:   "",
+	CellUnknown: "unknown",
+	CellNumber:  "number",
+	CellDate:    "date",
+	CellBool:    "bool",
+	CellError:   "error",
+	CellText:    "text",
+}
+
+// Valid reports whether t is a cell type an extractor may emit.
+func (t CellType) Valid() bool { return t > CellUnknown && t < cellEnd }
+
+func (t CellType) String() string {
+	if t < cellEnd {
+		return cellNames[t]
+	}
+	return fmt.Sprintf("cell(%d)", uint8(t))
+}
+
+func (t CellType) MarshalText() ([]byte, error) {
+	if t == CellUnset || t >= cellEnd {
+		return nil, fmt.Errorf("gofastcore: cannot marshal cell type %d", uint8(t))
+	}
+	return []byte(cellNames[t]), nil
+}
+
+func (t *CellType) UnmarshalText(b []byte) error {
+	*t = CellUnknown
+	for i := CellNumber; i < cellEnd; i++ {
+		if cellNames[i] == string(b) {
+			*t = i
+			break
 		}
 	}
 	return nil
