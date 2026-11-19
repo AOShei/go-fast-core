@@ -33,6 +33,11 @@ const (
 	KindNote
 	KindHeader
 	KindFooter
+	// KindThematicBreak is a break between topics or scenes that the
+	// source marks as such: an HTML <hr>, a Markdown thematic break.
+	// It has no text. Page, column and section breaks are layout and are
+	// not emitted as blocks.
+	KindThematicBreak
 	kindEnd
 )
 
@@ -52,6 +57,8 @@ var kindNames = [...]string{
 	KindNote:      "note",
 	KindHeader:    "header",
 	KindFooter:    "footer",
+
+	KindThematicBreak: "thematic_break",
 }
 
 // Valid reports whether k is a kind an extractor may emit.

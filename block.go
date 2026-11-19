@@ -18,6 +18,7 @@ package gofastcore
 //	KindNote         note, comment, list  -               Attrs: type, author, date
 //	KindHeader       running header       -               -
 //	KindFooter       running footer       -               -
+//	KindThematicBreak empty               -               -
 //
 // A heading's Level is 1 to 6. A source with deeper levels (Word has nine)
 // has them clamped to 6, with the real level, in decimal, in
@@ -26,6 +27,10 @@ package gofastcore
 // KindHeader and KindFooter are page furniture (repeated titles, page
 // numbers). They are kept so nothing is silently lost, and tagged so
 // consumers can drop them.
+//
+// KindThematicBreak marks a break between topics or scenes that the
+// source declares (an HTML <hr>, a Markdown thematic break). It is a
+// boundary a chunker can split on. It has no text and is never Continued.
 type Block struct {
 	Kind  Kind   `json:"kind"`
 	Level uint8  `json:"level,omitempty"`

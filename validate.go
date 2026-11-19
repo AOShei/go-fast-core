@@ -220,7 +220,7 @@ func (v *validator) block(b *Block, bp string) {
 	if p := textProblem(b.Text, b.Kind != KindCode, b.Kind != KindCode); p != "" {
 		v.bad("%s.text %s", bp, p)
 	}
-	if b.Text == "" && b.Kind != KindTable && b.Kind != KindImage {
+	if b.Text == "" && b.Kind != KindTable && b.Kind != KindImage && b.Kind != KindThematicBreak {
 		v.bad("%s: %s block has empty text", bp, b.Kind)
 	}
 	v.words(bp+".marker", b.Marker)
@@ -253,6 +253,14 @@ func (v *validator) block(b *Block, bp string) {
 	}
 	if b.Kind == KindTable && b.Text != "" {
 		v.bad("%s: table block must not carry text", bp)
+	}
+	if b.Kind == KindThematicBreak {
+		if b.Text != "" || len(b.Spans) > 0 {
+			v.bad("%s: thematic break must not carry text or spans", bp)
+		}
+		if b.Continued {
+			v.bad("%s: thematic break cannot be continued", bp)
+		}
 	}
 
 	for k, s := range b.Spans {

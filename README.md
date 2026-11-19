@@ -53,6 +53,9 @@ A block has a `Kind`, usually `Text`, and kind-specific fields:
 | `formula` | LaTeX, UnicodeMath or plain text | | `Attrs["notation"]`: `latex`, `unicodemath`, `plain` |
 | `note` | speaker note, comment, text removed by a tracked change, field instruction, or the values of a drop-down list | | `Attrs`: `type`, `author`, `date`, `field` |
 | `header`, `footer` | running page header/footer | | |
+| `thematic_break` | empty | | |
+
+A `thematic_break` is a break between topics or scenes that the source declares: an HTML `<hr>`, a Markdown `---`, a Word horizontal-line paragraph. It is a boundary a chunker can split on. It has no text, is never `Continued`, and `Markdown()` writes it as `---`; `Text()` writes nothing for it, since blocks are already separated by a blank line. Page, column and section breaks are layout, not content, and are not emitted as blocks: a paged format already has its pages as parts.
 
 Every block may also carry:
 

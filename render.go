@@ -137,6 +137,9 @@ func (r *renderer) skip(b *Block) bool {
 		return b.Table == nil || len(b.Table.Rows) == 0 || len(b.Table.Rows[0]) == 0
 	case b.Kind == KindImage && !r.md:
 		return b.Text == ""
+	case b.Kind == KindThematicBreak && !r.md:
+		// Plain text already separates blocks with a blank line.
+		return true
 	}
 	return false
 }
@@ -153,7 +156,7 @@ func joinable(k Kind) bool {
 
 func (r *renderer) block(b *Block) {
 	r.linked = ""
-	if r.md && b.Kind != KindCode && b.Kind != KindFormula && b.Kind != KindImage {
+	if r.md && b.Kind != KindCode && b.Kind != KindFormula && b.Kind != KindImage && b.Kind != KindThematicBreak {
 		// Links are written into the text before hidden passages are taken
 		// out of it, since their places are in the text as it is.
 		r.linked, _ = linkedText(b, r.opts.ExcludeHidden)
@@ -165,7 +168,7 @@ func (r *renderer) block(b *Block) {
 		visible := *b
 		if b.Table != nil {
 			visible.Table = b.Table.visible(exclude)
-		} else if visible.Text = b.VisibleText(exclude); visible.Text == "" && b.Kind != KindImage {
+		} else if visible.Text = b.VisibleText(exclude); visible.Text == "" && b.Kind != KindImage && b.Kind != KindThematicBreak {
 			return
 		}
 		b = &visible
@@ -269,6 +272,9 @@ func (r *renderer) markdown(b *Block, joined bool) {
 			first = "[^" + b.Marker + "]: "
 		}
 		r.lines(b.Text, first, "")
+
+	case KindThematicBreak:
+		w.WriteString("---")
 
 	case KindFormula:
 		w.WriteString("$$\n")
