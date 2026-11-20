@@ -43,6 +43,13 @@ const (
 	// document it means a metadata string contains invisible characters.
 	WarnTextHidden = "text.hidden"
 
+	// WarnTextUnshownOutlier: the part holds routine unshown data (a
+	// comment, an attribute, a field instruction, a document variable, a
+	// mail header) that is out of proportion for its kind (see
+	// UnshownOutlier). The blocks concerned are flagged HiddenInvisible.
+	// The message says how many items and of what kind.
+	WarnTextUnshownOutlier = "text.unshown_outlier"
+
 	// WarnTextTrackedChanges: the part has tracked changes. Its text is
 	// given as if all were accepted; each deletion is kept as a note block
 	// of type NoteDeletion.

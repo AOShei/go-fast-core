@@ -711,7 +711,7 @@ func TestAnchorAndNoteAttributes(t *testing.T) {
 
 func TestSharedCodesAreDistinct(t *testing.T) {
 	codes := []string{
-		WarnPartFailed, WarnPartNoText, WarnPartImageOnly, WarnTextHidden, WarnTextUnmappedGlyphs, WarnTextTrackedChanges,
+		WarnPartFailed, WarnPartNoText, WarnPartImageOnly, WarnTextHidden, WarnTextUnmappedGlyphs, WarnTextTrackedChanges, WarnTextUnshownOutlier,
 		WarnHeadingLevelClamped, WarnImageUnsupportedEncoding, WarnInputRepaired, WarnInputActiveContent,
 		WarnInputExternalReference, WarnInputAmbiguous, WarnLimitExceeded, WarnChildNotExtracted, WarnChildUnsupported,
 		WarnChildEncrypted, WarnChildFailed,
