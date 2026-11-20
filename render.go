@@ -19,6 +19,12 @@ type RenderOptions struct {
 	// and blocks of other parts whose Attrs[AttrStored] is set, such as
 	// the scripts of a PDF page. Both are left out by default.
 	Stored bool
+	// StoredKinds includes only the stored data of the kinds named (values
+	// of Attrs[AttrStored], such as StoredMarkupComment or
+	// StoredFieldCode), wherever it is: in the stored part or in any other
+	// part. A block of the stored part with no kind is included only by
+	// Stored. Stored includes every kind, whatever StoredKinds says.
+	StoredKinds []string
 	// PartMarkers emits a line before each part so that positions survive
 	// in the rendered text: "<!-- page 3 -->" in Markdown, "[page 3]" in
 	// plain text.
@@ -147,6 +153,14 @@ type renderer struct {
 	// linked is the text of the block being written with its links as
 	// Markdown links, or "" if it has none.
 	linked string
+	// inStored is set while the blocks of the stored part are written.
+	inStored bool
+}
+
+// storedWanted reports whether the options include stored data of the
+// given kind ("" for a block of the stored part that names none).
+func (r *renderer) storedWanted(kind string) bool {
+	return r.opts.Stored || kind != "" && slices.Contains(r.opts.StoredKinds, kind)
 }
 
 func (r *renderer) finish() error {
@@ -157,8 +171,17 @@ func (r *renderer) finish() error {
 }
 
 func (r *renderer) part(p *Part) {
-	if p.Display&r.opts.ExcludeDisplay != 0 || p.Kind == PartStored && !r.opts.Stored {
+	if p.Display&r.opts.ExcludeDisplay != 0 {
 		return
+	}
+	if p.Kind == PartStored && !r.opts.Stored {
+		// Only some kinds are wanted: the part is written, marker and
+		// all, only if one of its blocks is.
+		if !slices.ContainsFunc(p.Blocks, func(b Block) bool { return r.storedWanted(b.Attrs[AttrStored]) }) {
+			return
+		}
+		r.inStored = true
+		defer func() { r.inStored = false }()
 	}
 	if r.opts.PartMarkers {
 		label := p.Kind.String() + " " + strconv.Itoa(p.Number)
@@ -174,7 +197,7 @@ func (r *renderer) part(p *Part) {
 
 func (r *renderer) skip(b *Block) bool {
 	switch {
-	case b.Attrs[AttrStored] != "" && !r.opts.Stored:
+	case (b.Attrs[AttrStored] != "" || r.inStored) && !r.storedWanted(b.Attrs[AttrStored]):
 		return true
 	case b.Kind.Furniture() && !r.opts.Furniture:
 		return true

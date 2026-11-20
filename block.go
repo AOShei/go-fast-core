@@ -150,8 +150,15 @@ const (
 	StoredDefinedName      = "defined_name"
 	StoredDocumentVariable = "document_variable"
 	StoredCustomXML        = "custom_xml"
-	StoredFieldCode        = "field_code"
-	StoredMacro            = "macro"
+	// StoredFieldCode: the instruction of a field (a NoteField note, an
+	// RTF index or table-of-contents entry). Every field note carries it.
+	StoredFieldCode = "field_code"
+	StoredMacro     = "macro"
+	// StoredMarkupComment: a comment in the file's markup (an HTML or XML
+	// <!-- --> comment), which no reader displays. It stays where it
+	// stands. A reviewer's comment, which is displayed, is a NoteComment
+	// note and is not stored.
+	StoredMarkupComment = "markup_comment"
 	// StoredFormField: a field of a form that is shown on no page, such as
 	// a PDF form field with no widget.
 	StoredFormField = "form_field"
@@ -160,6 +167,13 @@ const (
 	// to a zip archive). The part also carries WarnInputTrailingData.
 	StoredAfterEnd = "after_end"
 )
+
+// StoredKindNames lists every value of Attrs[AttrStored], for a command
+// that takes kinds by name (RenderOptions.StoredKinds). Do not modify it.
+var StoredKindNames = []string{
+	StoredPivotCache, StoredDefinedName, StoredDocumentVariable, StoredCustomXML,
+	StoredFieldCode, StoredMacro, StoredMarkupComment, StoredFormField, StoredAfterEnd,
+}
 
 // Values of Attrs[AttrNotation].
 const (
@@ -182,7 +196,10 @@ const (
 	// NoteField is the instruction of a field whose result is in the text
 	// ("HYPERLINK ...", "MERGEFIELD Name"). It follows its paragraph. The
 	// instruction is never shown, but that is what a field is, not a
-	// declaration: the note sets no Display reason.
+	// declaration: the note sets no Display reason. It is stored data:
+	// every field note is marked Attrs[AttrStored] = StoredFieldCode, so
+	// the renderers leave it out unless RenderOptions.Stored or
+	// StoredKinds asks for it.
 	NoteField = "field"
 	// NoteChoices is the list of values a control offers to choose from:
 	// the drop-down of a spreadsheet cell (a data validation list), a

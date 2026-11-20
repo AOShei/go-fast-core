@@ -227,6 +227,10 @@ func (v *validator) block(b *Block, bp string) {
 		if b.Level < 1 {
 			v.bad("%s: %s level must be at least 1", bp, b.Kind)
 		}
+	case KindNote:
+		if b.Attrs[AttrNoteType] == NoteField && b.Attrs[AttrStored] != StoredFieldCode {
+			v.bad("%s: a field note must be marked %s=%s", bp, AttrStored, StoredFieldCode)
+		}
 	}
 	if (b.Kind == KindTable) != (b.Table != nil) {
 		v.bad("%s: table payload must be set exactly when kind is table", bp)
