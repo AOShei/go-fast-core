@@ -8,13 +8,12 @@ import (
 
 func breakDoc() *Document {
 	d := New("html")
-	d.HiddenChecked = HiddenChars
 	d.Parts = []Part{{Kind: PartBody, Number: 1, Blocks: []Block{
 		{Kind: KindParagraph, Text: "The storm passed."},
 		{Kind: KindThematicBreak},
 		{Kind: KindParagraph, Text: "Morning came."},
 	}}}
-	d.Parts[0].MarkHidden()
+	d.Parts[0].Finish()
 	return d
 }
 
@@ -55,7 +54,7 @@ func TestThematicBreakAfterListAndHeadingSpacing(t *testing.T) {
 		{Kind: KindThematicBreak},
 		{Kind: KindHeading, Level: 2, Text: "Next"},
 	}}}
-	d.Parts[0].MarkHidden()
+	d.Parts[0].Finish()
 	if got, want := d.Markdown(), "- one\n\n---\n\n## Next\n"; got != want {
 		t.Errorf("markdown: got %q, want %q", got, want)
 	}
@@ -63,21 +62,21 @@ func TestThematicBreakAfterListAndHeadingSpacing(t *testing.T) {
 
 func TestThematicBreakHidden(t *testing.T) {
 	d := breakDoc()
-	d.Parts[0].Blocks[1].Hidden = HiddenInvisible
+	d.Parts[0].Blocks[1].Display = DisplayHidden
 	d.Parts[0].Warnings = nil
-	d.Parts[0].MarkHidden()
+	d.Parts[0].Finish()
 	if err := d.Validate(); err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
 	var md strings.Builder
-	if err := d.WriteMarkdown(&md, &RenderOptions{ExcludeHidden: HiddenInvisible}); err != nil {
+	if err := d.WriteMarkdown(&md, &RenderOptions{ExcludeDisplay: DisplayHidden}); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(md.String(), "---") {
 		t.Errorf("hidden break rendered: %q", md.String())
 	}
 	if !strings.Contains(d.Markdown(), "---") {
-		t.Error("hidden break left out without ExcludeHidden")
+		t.Error("hidden break left out without ExcludeDisplay")
 	}
 }
 

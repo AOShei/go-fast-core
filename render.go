@@ -22,11 +22,11 @@ type RenderOptions struct {
 	// in the rendered text: "<!-- page 3 -->" in Markdown, "[page 3]" in
 	// plain text.
 	PartMarkers bool
-	// ExcludeHidden leaves out text hidden for any of the given reasons.
-	// The default is to include everything. Use HiddenAny to exclude all
-	// hidden text, or HiddenAny &^ HiddenTextLayer to keep the text layer
-	// of scanned pages, which would otherwise render empty.
-	ExcludeHidden Hidden
+	// ExcludeDisplay leaves out content the file declares with any of the
+	// given reasons. The default is to include everything. Excluding
+	// DisplayNoInk also leaves out the searchable text layer of scanned
+	// PDF pages, which would then render empty.
+	ExcludeDisplay Display
 }
 
 // Markdown renders the document (not its children) as Markdown with
@@ -110,7 +110,7 @@ func (r *renderer) finish() error {
 }
 
 func (r *renderer) part(p *Part) {
-	if p.Hidden&r.opts.ExcludeHidden != 0 || p.Kind == PartStored && !r.opts.Stored {
+	if p.Display&r.opts.ExcludeDisplay != 0 || p.Kind == PartStored && !r.opts.Stored {
 		return
 	}
 	if r.opts.PartMarkers {
@@ -161,21 +161,21 @@ func joinable(k Kind) bool {
 func (r *renderer) block(b *Block) {
 	r.linked = ""
 	if r.md && b.Kind != KindCode && b.Kind != KindFormula && b.Kind != KindImage && b.Kind != KindThematicBreak {
-		// Links are written into the text before hidden passages are taken
-		// out of it, since their places are in the text as it is.
-		r.linked, _ = linkedText(b, r.opts.ExcludeHidden)
+		// Links are written into the text before excluded passages are
+		// taken out of it, since their places are in the text as it is.
+		r.linked, _ = linkedText(b, r.opts.ExcludeDisplay)
 	}
-	if exclude := r.opts.ExcludeHidden; b.Hidden&exclude != 0 {
-		if b.HiddenWhole()&exclude != 0 {
+	if exclude := r.opts.ExcludeDisplay; b.Display&exclude != 0 {
+		if b.DisplayWhole()&exclude != 0 {
 			return
 		}
-		visible := *b
+		shown := *b
 		if b.Table != nil {
-			visible.Table = b.Table.visible(exclude)
-		} else if visible.Text = b.VisibleText(exclude); visible.Text == "" && b.Kind != KindImage && b.Kind != KindThematicBreak {
+			shown.Table = b.Table.displayed(exclude)
+		} else if shown.Text = b.DisplayedText(exclude); shown.Text == "" && b.Kind != KindImage && b.Kind != KindThematicBreak {
 			return
 		}
-		b = &visible
+		b = &shown
 	}
 	if r.skip(b) {
 		return
@@ -512,9 +512,9 @@ func linkDestination(href string, inTable bool) string {
 }
 
 // linkedText returns the text of b with its links written as Markdown
-// links and the passages hidden for a reason in exclude left out, as
-// VisibleText leaves them out. It returns "" and false if b has no link.
-func linkedText(b *Block, exclude Hidden) (string, bool) {
+// links and the passages declared with a reason in exclude left out, as
+// DisplayedText leaves them out. It returns "" and false if b has no link.
+func linkedText(b *Block, exclude Display) (string, bool) {
 	type link struct {
 		from, to int
 		href     string
@@ -535,17 +535,17 @@ func linkedText(b *Block, exclude Hidden) (string, bool) {
 	}
 	slices.SortStableFunc(links, func(a, c link) int { return a.from - c.from })
 	var cuts [][2]int
-	if b.Hidden&exclude != 0 {
-		if b.HiddenWhole()&exclude != 0 {
+	if b.Display&exclude != 0 {
+		if b.DisplayWhole()&exclude != 0 {
 			return "", false
 		}
 		for _, s := range b.Spans {
-			if s.Hidden&exclude != 0 && s.Start >= 0 && s.Start < s.End && s.End <= len(b.Text) {
+			if s.Display&exclude != 0 && s.Start >= 0 && s.Start < s.End && s.End <= len(b.Text) {
 				cuts = append(cuts, [2]int{s.Start, s.End})
 			}
 		}
 	}
-	hidden := func(at int) bool {
+	excluded := func(at int) bool {
 		for _, c := range cuts {
 			if at >= c[0] && at < c[1] {
 				return true
@@ -559,13 +559,13 @@ func linkedText(b *Block, exclude Hidden) (string, bool) {
 		if inLink {
 			piece = linkTextEscaper.Replace(strings.ReplaceAll(piece, "\n", " "))
 		}
-		// Do not leave a double space where a hidden passage was removed.
+		// Do not leave a double space where a passage was removed.
 		if strings.HasPrefix(piece, " ") && strings.HasSuffix(sb.String(), " ") {
 			piece = piece[1:]
 		}
 		sb.WriteString(piece)
 	}
-	// The text is walked from one boundary of a link or a hidden passage
+	// The text is walked from one boundary of a link or an excluded passage
 	// to the next.
 	bounds := []int{0, len(b.Text)}
 	for _, l := range links {
@@ -586,7 +586,7 @@ func linkedText(b *Block, exclude Hidden) (string, bool) {
 			li++
 		}
 		inLink := li < len(links) && links[li].from <= from && from < links[li].to
-		if hidden(from) {
+		if excluded(from) {
 			continue
 		}
 		if inLink && !open {

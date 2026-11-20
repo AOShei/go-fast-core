@@ -144,12 +144,6 @@ func (v *validator) document(d *Document, path string, top bool) {
 	}
 
 	v.warnings("warnings", d.Warnings)
-	if !d.HiddenChecked.Valid() {
-		v.bad("invalid hidden_checked %#x", uint16(d.HiddenChecked))
-	}
-	if len(d.Parts) > 0 && d.HiddenChecked&HiddenChars == 0 {
-		v.bad("hidden_checked does not list %s; set Document.HiddenChecked to the reasons that were fully checked", HiddenChars)
-	}
 
 	last := 0
 	for i := range d.Parts {
@@ -166,8 +160,8 @@ func (v *validator) document(d *Document, path string, top bool) {
 			if i != len(d.Parts)-1 {
 				v.bad("%s: a stored part must be the last part", pp)
 			}
-			if p.Hidden != 0 {
-				v.bad("%s: a stored part is not hidden as a whole (Hidden %s); flag the blocks that call for it", pp, p.Hidden)
+			if p.Display != 0 {
+				v.bad("%s: a stored part carries no part-level display reason (%s)", pp, p.Display)
 			}
 		}
 		if p.Width < 0 || p.Height < 0 {
@@ -176,23 +170,18 @@ func (v *validator) document(d *Document, path string, top bool) {
 		v.words(pp+".name", p.Name)
 		v.warnings(pp+".warnings", p.Warnings)
 		if p.Blocks == nil {
-			v.bad("%s: blocks is nil; call Part.MarkHidden, so that JSON has [] and not null", pp)
+			v.bad("%s: blocks is nil; call Part.Finish, so that JSON has [] and not null", pp)
 		}
-		if !p.Hidden.Valid() {
-			v.bad("%s: invalid hidden reasons %#x", pp, uint16(p.Hidden))
+		if !p.Display.Valid() {
+			v.bad("%s: invalid display reasons %#x", pp, uint16(p.Display))
 		}
-		anyHidden := false
 		for j := range p.Blocks {
 			b := &p.Blocks[j]
 			bp := fmt.Sprintf("%s.blocks[%d]", pp, j)
 			v.block(b, bp)
-			if b.Hidden&p.Hidden != p.Hidden {
-				v.bad("%s: lacks the hidden reasons of its part (%s)", bp, p.Hidden)
+			if b.Display&p.Display != p.Display {
+				v.bad("%s: lacks the display reasons of its part (%s); call Part.Finish", bp, p.Display)
 			}
-			anyHidden = anyHidden || b.Hidden != 0
-		}
-		if anyHidden && !p.Has(WarnTextHidden) {
-			v.bad("%s: has hidden blocks but no %s warning; call Part.MarkHidden", pp, WarnTextHidden)
 		}
 	}
 
@@ -225,14 +214,8 @@ func (v *validator) block(b *Block, bp string) {
 	}
 	v.words(bp+".marker", b.Marker)
 	v.textMap(bp+".attrs", b.Attrs)
-	if !b.Hidden.Valid() {
-		v.bad("%s: invalid hidden reasons %#x", bp, uint16(b.Hidden))
-	}
-	if b.Hidden&HiddenTextLayer != 0 && b.Hidden&hiddenPaint != 0 {
-		v.bad("%s: %s is combined with %s; a text layer carries no paint-related reason", bp, HiddenTextLayer, b.Hidden&hiddenPaint)
-	}
-	if b.Hidden&HiddenChars == 0 && InvisibleChars(b.Text) != nil {
-		v.bad("%s.text contains invisible characters that are not flagged; call Part.MarkHidden", bp)
+	if !b.Display.Valid() {
+		v.bad("%s: invalid display reasons %#x", bp, uint16(b.Display))
 	}
 
 	switch b.Kind {
@@ -266,8 +249,8 @@ func (v *validator) block(b *Block, bp string) {
 	for k, s := range b.Spans {
 		sp := fmt.Sprintf("%s.spans[%d]", bp, k)
 		v.text(sp+".href", s.Href)
-		if s.Hidden&^b.Hidden != 0 {
-			v.bad("%s: hidden reasons %s are not in the block's (%s)", sp, s.Hidden, b.Hidden)
+		if s.Display&^b.Display != 0 {
+			v.bad("%s: display reasons %s are not in the block's (%s)", sp, s.Display, b.Display)
 		}
 		if s.Start < 0 || s.End > len(b.Text) || s.Start >= s.End {
 			v.bad("%s: range [%d,%d) outside text of length %d", sp, s.Start, s.End, len(b.Text))
@@ -298,22 +281,13 @@ func (v *validator) block(b *Block, bp string) {
 		if len(t.Rows) > 0 {
 			cols = len(t.Rows[0])
 		}
-		for k, h := range t.Hidden {
-			if h.Row < 0 || h.Col < 0 || h.RowSpan < 1 || h.ColSpan < 1 ||
-				h.Row+h.RowSpan > len(t.Rows) || h.Col+h.ColSpan > cols {
-				v.bad("%s: hidden region %d (%+v) is outside the %dx%d grid", bp, k, h, len(t.Rows), cols)
+		for k, d := range t.Display {
+			if d.Row < 0 || d.Col < 0 || d.RowSpan < 1 || d.ColSpan < 1 ||
+				d.Row+d.RowSpan > len(t.Rows) || d.Col+d.ColSpan > cols {
+				v.bad("%s: display region %d (%+v) is outside the %dx%d grid", bp, k, d, len(t.Rows), cols)
 			}
-			if h.Hidden == 0 || h.Hidden&^b.Hidden != 0 {
-				v.bad("%s: hidden region %d has reasons %q, which must be non-empty and in the block's (%s)", bp, k, h.Hidden, b.Hidden)
-			}
-		}
-		if b.Hidden&HiddenChars == 0 {
-			for _, row := range t.Rows {
-				for _, cell := range row {
-					if InvisibleChars(cell) != nil {
-						v.bad("%s: a table cell contains invisible characters that are not flagged; call Part.MarkHidden", bp)
-					}
-				}
+			if d.Display == 0 || d.Display&^b.Display != 0 {
+				v.bad("%s: display region %d has reasons %q, which must be non-empty and in the block's (%s)", bp, k, d.Display, b.Display)
 			}
 		}
 	}

@@ -19,7 +19,6 @@ import (
 
 func sample() *Document {
 	d := New("pdf")
-	d.HiddenChecked = HiddenChars
 	d.Source.Name = "report.pdf"
 	d.Metadata = Metadata{
 		Title:   "Q3 Report",
@@ -51,7 +50,6 @@ func sample() *Document {
 	}
 	d.Parts[1].Warn(SeverityWarning, WarnImageUnsupportedEncoding, "JBIG2 not decoded")
 	child := New("xlsx")
-	child.HiddenChecked = HiddenChars
 	child.Source.Name = "data.xlsx"
 	child.Parts = []Part{{Kind: PartSheet, Number: 1, Name: "Sheet1", Blocks: []Block{
 		{Kind: KindTable, Loc: Location{Range: "A1:B2"}, Table: &Table{
@@ -77,7 +75,7 @@ func TestJSONRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, s := range []string{
-		`"kind":"page"`, `"kind":"list_item"`, `"style":"bold+italic"`, `"schema_version":"0.1"`,
+		`"kind":"page"`, `"kind":"list_item"`, `"style":"bold+italic"`, `"schema_version":"0.2"`,
 		`"origin":"inferred"`, `"severity":"warning"`, `"number":42`, `"outline":[`,
 	} {
 		if !strings.Contains(string(data), s) {
@@ -100,7 +98,7 @@ func TestJSONRoundTrip(t *testing.T) {
 }
 
 func TestUnknownNamesDecodeToUnknown(t *testing.T) {
-	const in = `{"schema_version":"0.1","source":{"format":"pdf"},"parts":[
+	const in = `{"schema_version":"0.2","source":{"format":"pdf"},"parts":[
 		{"kind":"hologram","number":1,
 		 "warnings":[{"code":"x.y","severity":"catastrophic"}],
 		 "blocks":[{"kind":"sidebar","text":"hi","origin":"divined",
@@ -198,7 +196,6 @@ func TestRenderOptions(t *testing.T) {
 
 func TestEmptyDocumentRendersEmpty(t *testing.T) {
 	d := New("txt")
-	d.HiddenChecked = HiddenChars
 	d.Parts = []Part{{Kind: PartBody, Number: 1, Blocks: []Block{}}}
 	if d.Markdown() != "" || d.Text() != "" {
 		t.Errorf("empty document rendered %q / %q", d.Markdown(), d.Text())
@@ -261,7 +258,6 @@ func TestMarkdownEscapesLeadingMarkers(t *testing.T) {
 
 func TestContinuedBlocksAreJoined(t *testing.T) {
 	d := New("pdf")
-	d.HiddenChecked = HiddenChars
 	d.Parts = []Part{
 		{Kind: PartPage, Number: 1, Blocks: []Block{
 			{Kind: KindParagraph, Text: "The sentence starts here and"},
@@ -379,10 +375,9 @@ func TestValidateRejects(t *testing.T) {
 
 func TestEmptyListsMarshalAsArrays(t *testing.T) {
 	d := New("pdf")
-	d.HiddenChecked = HiddenChars
 	d.Parts = append(d.Parts, Part{Kind: PartPage, Number: 1}) // a failed page: no blocks
 	d.Parts[0].Warn(SeverityError, WarnPartFailed, "")
-	d.Parts[0].MarkHidden()
+	d.Parts[0].Finish()
 	d.Children = []*Document{(*Options)(nil).ExtractChild(context.Background(), "a.bin", "", nil, 0)}
 	if err := d.Validate(); err != nil {
 		t.Fatal(err)
@@ -414,7 +409,6 @@ func TestEmptyListsMarshalAsArrays(t *testing.T) {
 	// The model has no custom marshalers, so a nil list would be written
 	// as null. Validate is what stops one from being produced.
 	nilBlocks := New("pdf")
-	nilBlocks.HiddenChecked = HiddenChars
 	nilBlocks.Parts = []Part{{Kind: PartPage, Number: 1}}
 	if nilBlocks.Validate() == nil {
 		t.Error("nil blocks accepted")
@@ -425,7 +419,6 @@ func TestEmptyListsMarshalAsArrays(t *testing.T) {
 	}
 	for name, table := range map[string]*Table{"no rows": {}, "no columns": {Rows: [][]string{{}}}} {
 		e := New("pdf")
-		e.HiddenChecked = HiddenChars
 		e.Parts = []Part{{Kind: PartPage, Number: 1, Blocks: []Block{{Kind: KindTable, Table: table}}}}
 		if e.Validate() == nil {
 			t.Errorf("table with %s accepted", name)
@@ -435,7 +428,6 @@ func TestEmptyListsMarshalAsArrays(t *testing.T) {
 
 func BenchmarkMarshal(b *testing.B) {
 	d := New("pdf")
-	d.HiddenChecked = HiddenChars
 	for p := 1; p <= 100; p++ {
 		part := Part{Kind: PartPage, Number: p, Width: 612, Height: 792}
 		for i := range 12 {
@@ -448,7 +440,7 @@ func BenchmarkMarshal(b *testing.B) {
 		part.Blocks = append(part.Blocks, Block{Kind: KindTable, Origin: OriginInferred, Table: &Table{
 			HeaderRows: 1, Rows: [][]string{{"Region", "Q1", "Q2"}, {"EMEA", "1.2", "1.4"}},
 		}})
-		part.MarkHidden()
+		part.Finish()
 		d.Parts = append(d.Parts, part)
 	}
 	out, err := json.Marshal(d)
@@ -465,7 +457,6 @@ func BenchmarkMarshal(b *testing.B) {
 func TestValidateTextConventions(t *testing.T) {
 	para := func(text string) *Document {
 		d := New("pdf")
-		d.HiddenChecked = HiddenChars
 		d.Parts = []Part{{Kind: PartPage, Number: 1, Blocks: []Block{{Kind: KindParagraph, Text: text}}}}
 		return d
 	}
@@ -591,14 +582,12 @@ func TestExtractChild(t *testing.T) {
 				t.Errorf("child options not derived correctly: %+v", o)
 			}
 			d := New("txt")
-			d.HiddenChecked = HiddenChars
 			d.Parts = []Part{{Kind: PartBody, Number: 1, Blocks: []Block{}}}
 			d.Children = append(d.Children, o.ExtractChild(ctx, "inner-of-"+name, "", r, size))
 			return d, nil
 		},
 	}
 	root := New("eml")
-	root.HiddenChecked = HiddenChars
 	root.Parts = []Part{{Kind: PartMessage, Number: 1, Blocks: []Block{}}}
 	root.Children = append(root.Children, opts.ExtractChild(ctx, "a.txt", "text/plain", data, 5))
 	if !reflect.DeepEqual(depths, []int{1, 2}) {
@@ -657,7 +646,6 @@ func TestErrorsAreDistinct(t *testing.T) {
 
 func TestHeadingMarkerIsRendered(t *testing.T) {
 	d := New("docx")
-	d.HiddenChecked = HiddenChars
 	d.Parts = []Part{{Kind: PartBody, Number: 1, Blocks: []Block{
 		{Kind: KindHeading, Level: 1, Marker: "2", Text: "Terms"},
 		{Kind: KindHeading, Level: 2, Marker: "2.3", Text: "Scope"},
@@ -681,7 +669,6 @@ func TestHeadingMarkerIsRendered(t *testing.T) {
 
 func TestAnchorAndNoteAttributes(t *testing.T) {
 	d := New("docx")
-	d.HiddenChecked = HiddenChars
 	d.Parts = []Part{{Kind: PartBody, Number: 1, Blocks: []Block{
 		{Kind: KindParagraph, Text: "The price is 600.", Loc: Location{Anchor: "1A2B3C4D"}},
 		{Kind: KindNote, Text: "500", Attrs: map[string]string{AttrNoteType: NoteDeletion, AttrAuthor: "Ada", AttrDate: "2026-03-04T10:00:00Z"}},
@@ -711,7 +698,7 @@ func TestAnchorAndNoteAttributes(t *testing.T) {
 
 func TestSharedCodesAreDistinct(t *testing.T) {
 	codes := []string{
-		WarnPartFailed, WarnPartNoText, WarnPartImageOnly, WarnTextHidden, WarnTextUnmappedGlyphs, WarnTextTrackedChanges, WarnTextUnshownOutlier,
+		WarnPartFailed, WarnPartNoText, WarnPartImageOnly, WarnTextUnmappedGlyphs, WarnTextTrackedChanges, WarnInputTrailingData,
 		WarnHeadingLevelClamped, WarnImageUnsupportedEncoding, WarnInputRepaired, WarnInputActiveContent,
 		WarnInputExternalReference, WarnInputAmbiguous, WarnLimitExceeded, WarnChildNotExtracted, WarnChildUnsupported,
 		WarnChildEncrypted, WarnChildFailed,
@@ -755,9 +742,8 @@ func TestLigatures(t *testing.T) {
 func TestValidateLigaturesEverywhere(t *testing.T) {
 	base := func() *Document {
 		d := New("test")
-		d.HiddenChecked = HiddenChars
 		p := Part{Kind: PartBody, Number: 1, Blocks: []Block{{Kind: KindListItem, Level: 1, Text: "x"}}}
-		p.MarkHidden()
+		p.Finish()
 		d.Parts = []Part{p}
 		return d
 	}
@@ -799,7 +785,6 @@ func TestContinuedTablesAreJoined(t *testing.T) {
 		return Block{Kind: KindTable, Continued: continued, Table: &Table{HeaderRows: header, Rows: rows}}
 	}
 	d := New("xlsx")
-	d.HiddenChecked = HiddenChars
 	d.Parts = []Part{
 		{Kind: PartSheet, Number: 1, Name: "Data", Blocks: []Block{
 			table(1, false, []string{"Region", "Total"}, []string{"North", "10"}),
@@ -988,19 +973,18 @@ func TestMarkdownLinks(t *testing.T) {
 	h0, h1 := at(" Hidden.")
 	d := New("x")
 	d.Parts = append(d.Parts, Part{Kind: PartBody, Number: 1, Blocks: []Block{
-		{Kind: KindParagraph, Text: text, Hidden: HiddenInvisible, Spans: []Span{
+		{Kind: KindParagraph, Text: text, Display: DisplayHidden, Spans: []Span{
 			// One link in two spans, bold in the middle.
 			{Start: r0, End: r0 + 4, Href: "https://example.org/a report (2026)"},
 			{Start: r0 + 4, End: r1, Style: StyleBold, Href: "https://example.org/a report (2026)"},
 			{Start: s0, End: s1, Href: "https://example.org/<x>"},
-			{Start: h0, End: h1, Hidden: HiddenInvisible},
+			{Start: h0, End: h1, Display: DisplayHidden},
 		}},
 		{Kind: KindHeading, Level: 1, Text: "Heading link", Spans: []Span{{Start: 8, End: 12, Href: "#top"}}},
 		{Kind: KindTable, Table: &Table{HeaderRows: 1, Rows: [][]string{{"Name", "Site"}, {"Ada", "a|b"}},
 			Cells: []CellDetail{{Row: 1, Col: 1, Href: "https://example.org/a|b", Formula: "HYPERLINK(\"x\")", Type: CellText}}}},
 	}})
-	d.HiddenChecked = HiddenChars
-	d.Parts[0].MarkHidden()
+	d.Parts[0].Finish()
 	if err := d.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -1015,7 +999,7 @@ func TestMarkdownLinks(t *testing.T) {
 		t.Errorf("markdown:\n%s\nwant:\n%s", md.String(), want)
 	}
 	md.Reset()
-	d.WriteMarkdown(&md, &RenderOptions{ExcludeHidden: HiddenAny})
+	d.WriteMarkdown(&md, &RenderOptions{ExcludeDisplay: DisplayAny})
 	if got := strings.SplitN(md.String(), "\n", 2)[0]; got != "See [the \\[annual\\] report](<https://example.org/a report (2026)>) or the [site](<https://example.org/%3Cx%3E>). Done." {
 		t.Errorf("without hidden text: %q", got)
 	}
@@ -1031,7 +1015,6 @@ func TestValidateCellDetails(t *testing.T) {
 		d := New("x")
 		d.Parts = append(d.Parts, Part{Kind: PartSheet, Number: 1, Blocks: []Block{
 			{Kind: KindTable, Table: &Table{Rows: [][]string{{"1", "2"}, {"3", "4"}}, Cells: cells}}}})
-		d.HiddenChecked = HiddenChars
 		return d.Validate()
 	}
 	if err := check([]CellDetail{{Row: 0, Col: 1, Formula: "A1*2", Type: CellNumber, Value: "2.0000001"}, {Row: 1, Col: 0, Href: "#x"}}); err != nil {
@@ -1062,13 +1045,13 @@ func TestValidateCellDetails(t *testing.T) {
 	}
 }
 
-// A stored part is the last and is hidden.
+// A stored part is the last and carries no part-level reason.
 func TestValidateStoredPart(t *testing.T) {
 	doc := func(parts ...Part) *Document {
 		d := New("x")
-		d.Parts, d.HiddenChecked = parts, HiddenChars
+		d.Parts = parts
 		for i := range d.Parts {
-			d.Parts[i].MarkHidden()
+			d.Parts[i].Finish()
 		}
 		return d
 	}
@@ -1084,9 +1067,9 @@ func TestValidateStoredPart(t *testing.T) {
 		t.Error("a stored part before another was accepted")
 	}
 	hidden := stored
-	hidden.Hidden = HiddenInvisible
+	hidden.Display = DisplayHidden
 	if doc(body, hidden).Validate() == nil {
-		t.Error("a stored part hidden as a whole was accepted")
+		t.Error("a stored part with a part-level reason was accepted")
 	}
 	// The renderers leave the stored part out unless asked for it.
 	d := doc(body, stored)

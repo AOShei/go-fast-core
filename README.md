@@ -8,7 +8,7 @@ Every extractor (`go-fast-pdf`, and later ooxml, html, email, ...) returns the s
 import "github.com/AOShei/go-fast-core" // package gofastcore
 ```
 
-**Status: schema version 0.1, agreed with the PDF extractor over two review rounds on 2026-11-18.** Not yet tagged. It will be tagged v0.1.0 once `go-fast-pdf` has been ported to it.
+**Status: schema version 0.2.** Version 0.1 was agreed with the PDF extractor over two review rounds on 2026-11-18. Version 0.2 (2026-11-20) replaced the hidden-text verdicts with what a file declares about display; see [What the file declares](#what-the-file-declares). Not yet tagged. It will be tagged v0.1.0 once `go-fast-pdf` has been ported to it.
 
 ## Series conventions
 
@@ -18,7 +18,7 @@ import "github.com/AOShei/go-fast-core" // package gofastcore
 - **Dependencies.** The standard library and other go-fast modules only. `go-fast-core` itself imports only the standard library. Any other dependency must be challenged.
 - **Layering.** The shared model is the common denominator across formats. An extractor may offer a richer native API beside it (for PDF: word and line boxes, font names and sizes, glyph positions). Those details stay out of core.
 - **Preserve content.** Anything that is real content, whether it carries meaning or provides context, is preserved where possible. Normalizing a representation is fine (a ligature to its letters, `\r\n` to `\n`); dropping or flattening something the author put there is not. This is why tabs are kept in text, running headers and footers are tagged instead of removed, and an attachment that cannot be extracted is still listed.
-- **Flag hidden text, never drop it.** Text a reader cannot see is extracted like any other and marked with the reason it is hidden. The libraries report the fact; whether it is an attack or a scanned page's text layer is the caller's judgement. See [Hidden text](#hidden-text).
+- **Report what the file declares; never judge.** Content the file says is not shown, or draws with no ink, is extracted like any other and carries that declaration. The libraries do not judge whether text is visible, suspicious or safe. See [What the file declares](#what-the-file-declares).
 - **No OCR.** The go-fast libraries extract what the file contains. They report what they found and leave the next step to the caller.
 
 ## The model
@@ -28,7 +28,6 @@ Document
 ├── Source      format, name, MIME, size
 ├── Metadata    title, authors, dates, language, extra
 ├── Outline[]   the source's own table of contents (PDF bookmarks, epub nav)
-├── HiddenChecked  which hidden-text checks ran
 ├── Parts[]     the format's natural unit: page, slide, sheet, chapter, message, body;
 │   │           and, last, what the file stores and shows nowhere (stored)
 │   ├── Blocks[]    content in reading order
@@ -60,10 +59,10 @@ A `thematic_break` is a break between topics or scenes that the source declares:
 Every block may also carry:
 
 - `Origin`: `native` when the source declares the block's kind, level and boundaries (a docx style, an HTML tag, a tagged-PDF element, a PDF outline entry), `inferred` when the extractor deduced them from geometry or fonts. Absent in JSON means `native`. It does not cover the block's position in the reading order: a PDF image is `native` even though where it falls among the text is inferred.
-- `Hidden`: the reasons text in this block is not visible to a reader of the source. Absent in JSON means none was found. See [Hidden text](#hidden-text).
+- `Display`: the reasons the file declares that content in this block is not shown (`hidden`) or drawn with no ink (`no_ink`). Absent in JSON means the file declares neither, which says nothing about whether a reader can see the text. See [What the file declares](#what-the-file-declares).
 - `Continued`: this block continues the nearest block of the same kind before it: the last one of the previous part, such as a paragraph split by a page break, or the one before it in the same part, such as a table too long for one block and split by rows. A continued table has the columns of the table it continues. The renderers run a continued block on to the one it continues.
 - `Loc`: where it came from. `BBox` for paged formats, `Range` (A1 notation) for sheets, `Offset`/`Length` for plain-text formats, `Anchor` for formats where the source itself names its blocks (a Word paragraph id, an HTML `id`, an e-book fragment). This is what lets a retrieval hit be cited.
-- `Spans`: inline bold/italic/link ranges over `Text` (optional), and the ranges that are hidden (always present when part of a block is hidden).
+- `Spans`: inline bold/italic/link ranges over `Text` (optional), and the ranges that carry a `Display` reason (always present when the reason applies to only part of a block).
 - `Attrs`: format-specific key/values with no dedicated field.
 
 ### Labels, notes and deep headings
@@ -76,12 +75,12 @@ Every block may also carry:
   | `comment` | A reviewer's comment or annotation attached to the content |
   | `deletion` | Text removed by a tracked change. The document's text is given as if the change were accepted; the removed text is kept here |
   | `speaker` | The speaker's notes of a slide |
-  | `field` | The instruction of a field whose result is in the text (`HYPERLINK ...`, `MERGEFIELD Name`); flagged `invisible`, since it is never shown |
-  | `choices` | The values a control offers to choose from (a spreadsheet cell's drop-down, a drop-down form field or content control, a PDF choice field), one per line in the source's order. A list taken from cells elsewhere is given as the reference to them (`=Lists!$A$1:$A$12`), since those values are already in the text. It follows the control's block, or on a sheet stands at the cells it is for (`Loc.Range`), with the control's name in `field` where the source names one. Not flagged hidden for that alone: a reader who opens the list sees the values |
+  | `field` | The instruction of a field whose result is in the text (`HYPERLINK ...`, `MERGEFIELD Name`). It is never shown, but that is what a field is, not a declaration: no `Display` reason |
+  | `choices` | The values a control offers to choose from (a spreadsheet cell's drop-down, a drop-down form field or content control, a PDF choice field), one per line in the source's order. A list taken from cells elsewhere is given as the reference to them (`=Lists!$A$1:$A$12`), since those values are already in the text. It follows the control's block, or on a sheet stands at the cells it is for (`Loc.Range`), with the control's name in `field` where the source names one. No `Display` reason |
 
   `author` and `date` are as the source gives them.
 - **A table's cells can say more than their text** (`Table.Cells`, an entry only for a cell that has something): where the cell links to (`href`, with `Spans`), the formula whose result it shows (`formula`, never evaluated), and the type of the value it stores with the value where the text does not show it in full (`type`: `number`, `date`, `bool`, `error`, `text`; `value`), both with `Options.Cells`. The renderers write the links, never formulas or values: a formula can hold text nobody sees on the sheet.
-- **Data the file stores and never shows** is read as data, never run, evaluated or followed, with `Attrs["stored"]` saying what it is: `pivot_cache` (the records of a pivot table whose source is gone), `defined_name`, `document_variable`, `custom_xml`, `field_code`, `macro`, `form_field` (a field of a form shown on no page). It is **not** flagged hidden for being stored: nearly every file stores some such data, so the flag would tell nothing (see [What earns a flag](#what-earns-a-flag)). What belongs to the file and to no page, sheet or slide goes in a part of kind `stored`: at most one, the last, not hidden as a whole. The renderers leave it out unless `RenderOptions.Stored` is set. `Options.Parts` selects it only with the whole document, and a reader that gives parts one at a time gives it last.
+- **Data the file stores and never shows** is read as data, never run, evaluated or followed, with `Attrs["stored"]` saying what it is: `pivot_cache` (the records of a pivot table whose source is gone), `defined_name`, `document_variable`, `custom_xml`, `field_code`, `macro`, `form_field` (a field of a form shown on no page), `after_end` (data after the logical end of the file: after an RTF document's closing brace, after a PDF's last `%%EOF`, appended to a zip; the part also carries an `input.trailing_data` warning). Being stored records where the text came from; it sets no `Display` reason. What belongs to the file and to no page, sheet or slide goes in a part of kind `stored`: at most one, the last, with no part-level reason. The renderers leave it out unless `RenderOptions.Stored` is set. `Options.Parts` selects it only with the whole document, and a reader that gives parts one at a time gives it last.
 - **The value of a form field or control** that its own appearance does not show (a PDF form field, a Word form field or content control) is a block at its place, with the field's name in `Attrs["field"]` (`AttrField`).
 - **Heading levels are 1 to 6.** A source with deeper levels (Word has nine) has them clamped to 6, with the real level in `Attrs["level"]`, and the part carries the `structure.heading_level_clamped` warning at severity `info`. Levels above six are not allowed because Markdown has none.
 
@@ -106,7 +105,7 @@ Every block may also carry:
 6. A block that runs across a part boundary is either assigned to the part where it starts or split, with `Continued` set on the later piece. A table too large for one block is split by rows within its part, with `Continued` set on the later pieces.
 7. `Table` is set exactly on `table` blocks, `Image` exactly on `image` blocks.
 8. `Extract` is safe to call from many goroutines and honors context cancellation.
-9. Hidden text is extracted and flagged, never dropped. Every extractor calls `part.MarkHidden()` on each finished part and records in `Document.HiddenChecked` which reasons it fully checked.
+9. Content the file declares not shown or not inked is extracted like any other and carries the reason in `Display`, never dropped. Nothing else about visibility is judged. Every extractor calls `part.Finish()` on each finished part.
 10. `Document.Parts`, `Part.Blocks` and `Table.Rows` are never nil, so JSON has `[]` and never `null`. A table has at least one row and one column.
 11. Output is deterministic: the same input and options give the same document whatever `Options.Workers` is, including where a limit truncates it.
 
@@ -135,7 +134,7 @@ if err := doc.Validate(); err != nil { t.Fatal(err) }
 
 `parts`, `blocks` and `rows` are always arrays, `[]` when empty and never `null`, so a consumer can iterate them without a nil check on a failed page or an unextracted child.
 
-The model has no custom JSON marshalers, which keeps encoding at the full speed of `encoding/json`. The guarantee comes from the lists never being nil: `New` creates an empty parts list, `part.MarkHidden()` makes an empty blocks list, and a table has at least one row and one column. `Validate` rejects a nil list.
+The model has no custom JSON marshalers, which keeps encoding at the full speed of `encoding/json`. The guarantee comes from the lists never being nil: `New` creates an empty parts list, `part.Finish()` makes an empty blocks list, and a table has at least one row and one column. `Validate` rejects a nil list.
 
 ### Coordinates
 
@@ -176,13 +175,12 @@ Shared codes (constants `Warn*`):
 | `part.failed` | The part could not be parsed; its blocks are missing or incomplete |
 | `part.no_text` | The part was parsed and contains no text and no images |
 | `part.image_only` | The part was parsed and contains no text, but does contain image content. Reported whatever `Options.Images` is set to |
-| `text.hidden` | The part contains text a reader of the source cannot see; the blocks carry the reasons. Severity `info` when the only reason is a scan's text layer |
-| `text.unshown_outlier` | Routine unshown data (a comment, attribute, field instruction, document variable, mail header) is out of proportion for its kind; the blocks concerned are flagged `invisible`. See [What earns a flag](#what-earns-a-flag) |
 | `text.tracked_changes` | The part has tracked changes. Its text is given as if all were accepted; each deletion is kept as a `note` block of type `deletion` |
 | `structure.heading_level_clamped` | The part has headings deeper than six levels; each has level 6 and its real level in `Attrs["level"]` |
 | `text.unmapped_glyphs` | Some text has no Unicode mapping in the source and appears as U+FFFD or is absent |
 | `image.unsupported_encoding` | Image data was requested and an image uses an encoding the extractor cannot deliver; its block has no data |
 | `input.repaired` | The input was structurally damaged and was read by a recovery path |
+| `input.trailing_data` | Data follows the logical end of the file; its text is in the stored part with `Attrs["stored"]` `after_end`. The message says how many bytes follow the end |
 | `input.active_content` | The input contains something meant to be run, or an instruction to run something: macros, scripts, an action that starts a program or opens a file. It is not read and never run |
 | `input.external_reference` | The input refers to a file or address outside itself other than by an ordinary hyperlink: a remote template, a linked picture, an action that sends or loads data. Nothing is fetched or sent |
 | `input.ambiguous` | The input can be read as two different documents depending on the program, such as an archive that names a member twice in two ways |
@@ -205,109 +203,58 @@ for i := range doc.Parts {
 }
 ```
 
-## Hidden text
+## What the file declares
 
-Text that a reader of the source cannot see still reaches whatever consumes the extracted text. Planting instructions that way is a known method of poisoning the context of an AI system. Hidden text also has ordinary uses: the text layer of a scanned page, screen-reader text, a collapsed menu, a lookup sheet.
+The libraries report what a file declares about its content; they do not judge whether text is visible or harmful, and the absence of a reason says nothing about either. Threat detection is outside these libraries.
 
-The go-fast libraries do not decide which it is. They **extract hidden text like any other and flag it with the reason it is not visible**, so the caller can review, quarantine or exclude it.
+Everything a file contains is extracted, including content the file says is not to be shown. Where the file declares that, the block, span, table region or part carries the reason in `Display`:
 
-### What earns a flag
-
-**The flag is a signal of suspicious hiding, not a label for everything a reader does not see.** It is set where a hiding mechanism is applied to content that would otherwise be seen: hidden formatting (`display:none`, Word's hidden text, RTF `\v`), text in the colour of its background, text too small to read, a 1-pixel box holding 400 words, text placed off the page or under a picture, a hidden sheet or row, invisible characters.
-
-Data that files routinely keep and never display is extracted, bounded and **not** flagged: metadata, mail headers, comments in markup, accessibility and tooltip attributes, field instructions, index entries, scripts, macro code, form values. Almost every file has some, so a flag on it would be set on clean and poisoned files alike and tell them apart in neither. An extractor flags such data only where one item is **out of proportion** for its kind, like a tooltip holding a paragraph of instructions. `UnshownOutlier` decides it the same way for every library: more than 30 words (`UnshownOutlierWords`), or more than 300 characters other than white space (`UnshownOutlierChars`), which catches text written without spaces, such as Chinese or Japanese, and encoded payloads such as base64. A word is a token of letters, digits, apostrophes and hyphens, so machine-written `key=value` data and addresses count by length only. An extractor may exempt kinds of data that are long by nature (script code, the signatures in mail headers) and says so in its README. An outlier is flagged `invisible`, and its part gets a `text.unshown_outlier` warning (`WarnTextUnshownOutlier`) saying how many items of what kind.
-
-Some unshown data is a signal at any length, because clean files do not have it at all: bytes after the logical end of a file (after an RTF document's closing brace, after a PDF's last `%%EOF`, appended to a zip). That is flagged `invisible` whatever its size.
-
-Before adding a check, ask whether most clean files of the format would trip it. If they would, it is not a signal.
-
-**A flag is evidence that text is hidden. No flag is not evidence that a document is safe.** An extractor cannot see text inside images, a font whose glyphs display one thing and map to another, or visibility controlled by external stylesheets and scripts.
-
-### Reasons
-
-| Reason | Meaning |
+| Reason | The file declares |
 |---|---|
-| `invisible` | The source marks the text as not displayed: PDF invisible render mode or a layer that is off; Word hidden-text formatting; a hidden slide, sheet, row or column; HTML `display:none`, `visibility:hidden`, `hidden`. Also routine unshown data that is out of proportion for its kind (see above) |
-| `text_layer` | Unpainted text lying within an image that covers at least half of its page (`HiddenTextLayerCoverage`), which is how a scanned page's searchable text is stored. Nothing verifies that it matches the image. It stands alone: see below |
-| `tiny` | Displayed smaller than 2 points (`HiddenTinySize`) |
-| `low_contrast` | Text color indistinguishable from what is behind it: WCAG contrast ratio under 1.2 (`HiddenContrastRatio`) and neither red nor green more than 32 of 255 apart (`HiddenColorDistance`), which is what `LowContrast` tests. The ratio compares brightness alone: green on red of the same brightness is in plain view and is not flagged. A difference in blue alone does not make text legible, so yellow or cream on white is flagged |
-| `off_page` | Positioned outside the visible area of the page, slide or viewport |
-| `clipped` | Outside a clipping region, including a box too small to show the text with overflow cut off |
-| `occluded` | Covered by an image or a filled shape |
-| `transparent` | Drawn with zero opacity |
-| `invisible_chars` | Contains characters that display as nothing yet can carry a payload (`InvisibleChars`) |
+| `hidden` | The content is switched off: hidden formatting or the hidden attribute; a hidden sheet, row, column, slide, shape, layer or annotation; `display:none` |
+| `no_ink` | The text is drawn with no paint: no fill, full transparency, PDF text render mode 3 or 7 |
 
-The thresholds live in core so that a reason means the same in every format.
+**What counts as declared.** A reason is set only where the file states it, in one switch or one value of the content or of something containing it. Following the file's own inheritance (a style, an ancestor element) to find that switch counts. If deciding needs **two values compared** or **a threshold**, it is not a declaration and is not reported: colour against background (white on white included), a size against a minimum, a box against the page or against another box, the coverage of an image, an evaluated condition. Each library's README lists, one line each, the declarations it reports for its format.
 
-A block flagged `text_layer` carries none of the reasons that describe how painted text fails to be seen (`invisible`, `tiny`, `low_contrast`, `clipped`, `occluded`, `transparent`), whichever way the file hides it, including text drawn first and covered by the page image. That keeps its warning at `info` and makes "exclude everything hidden except text layers" work. Unpainted text over a smaller image is `invisible`. `Validate` enforces the rule.
+**Characters are kept.** Zero-width characters, Unicode tag characters, bidirectional controls and variation selectors stay in the text as the file has them, subject only to the [text conventions](#text-conventions). No reason or warning is set for them.
 
-`invisible_chars` is not one of those reasons. A text layer that contains invisible characters is flagged `text_layer+invisible_chars`, and its warning is `warning`, not `info`: smuggled characters are worth reporting wherever they are.
+**Scanned PDFs.** The searchable text layer of a scanned page is drawn with no ink, so it carries `no_ink`. Excluding `no_ink` leaves that text out.
 
-`invisible_chars` covers Unicode tag characters (which mirror ASCII invisibly and which language models can read), the bidirectional overrides U+202D and U+202E, runs of four or more zero-width characters, and runs of two or more variation selectors. Single zero-width characters and well-formed emoji sequences are ordinary text and are not flagged. Core runs this scan for every format, plain text included.
+### Where the reason is
 
-### Where the flag is
-
-- **`Block.Hidden`** lists every reason found in the block. `b.Hidden != 0` is the only test needed to find hidden content.
-- **Part of a block.** When only a passage is hidden, a `Span` with `Hidden` set marks the range; for a table, a `HiddenCells` region marks the cells. A reason that appears on a span or region applies only there. A reason that appears on none applies to the whole block. `b.HiddenWhole()` and `b.VisibleText(exclude)` do this arithmetic.
-- **`Part.Hidden`** marks a whole hidden sheet or slide; its blocks carry the same reasons.
-- **One `text.hidden` warning per part** that has any, so "does this document contain hidden text?" is one loop over the parts.
+- **`Block.Display`** lists every reason declared anywhere in the block, so `b.Display != 0` is the only test needed.
+- **Part of a block.** When a reason applies to only a passage, a `Span` with `Display` set marks the range; for a table, a `DisplayCells` region marks the cells. A reason that appears on a span or region applies only there; one that appears on none applies to the whole block. `b.DisplayWhole()` and `b.DisplayedText(exclude)` do this arithmetic.
+- **`Part.Display`** marks a whole hidden sheet or slide; its blocks carry the same reasons.
+- There is no warning for content that carries a reason. Warnings are for facts about the extraction: damage, limits, unsupported features, encryption, trailing data.
 
 ```json
-{"kind": "paragraph", "hidden": "low_contrast",
- "text": "Visible one. Hidden sentence. Visible two.",
- "spans": [{"start": 13, "end": 29, "hidden": "low_contrast"}]}
+{"kind": "paragraph", "display": "hidden",
+ "text": "Shown one. Hidden sentence. Shown two.",
+ "spans": [{"start": 11, "end": 27, "display": "hidden"}]}
 ```
 
-A reason added by a newer extractor decodes as `unknown` and is kept, so hidden text never looks visible to an older consumer.
-
-### What was checked
-
-No library can check every reason: plain text has no colors, HTML cannot know what covers what, and PDF's contrast check needs `Options.DeepHidden`. So that the absence of a flag can be audited, every document records which checks ran:
-
-```json
-{"schema_version": "0.1", "source": {"format": "pdf"},
- "hidden_checked": "invisible+text_layer+tiny+off_page+transparent+invisible_chars", ...}
-```
-
-- A reason **listed** in `Document.HiddenChecked` was checked completely, as far as that extractor is able (its documentation states the limits). A block without that flag was looked at and nothing was found.
-- A reason **not listed** was not checked, or only in part. It may still appear on a block where a cheaper check happened to find it, but its absence says nothing.
-- `invisible_chars` is always listed. `Validate` requires it.
-
-With this, "no hidden text was found" and "hidden text was not looked for" are different, machine-readable answers.
+A reason added by a newer extractor decodes as `unknown` and is kept.
 
 ### Using it
 
-```go
-for part, b := range doc.AllBlocks() {
-    if b.Hidden != 0 {
-        review(part.Number, b.Hidden, b.Text) // the caller's decision
-    }
-}
-```
-
-`Markdown()` and `Text()` include hidden text by default: flagging does not block extraction. To leave it out of rendered output:
+`Markdown()` and `Text()` include everything by default. To leave declared content out of rendered output:
 
 ```go
-// Everything hidden:
-doc.WriteText(w, &gofastcore.RenderOptions{ExcludeHidden: gofastcore.HiddenAny})
+// Everything with a declared reason:
+doc.WriteText(w, &gofastcore.RenderOptions{ExcludeDisplay: gofastcore.DisplayAny})
 
-// Everything hidden except the text layer of scanned pages,
-// which would otherwise render empty:
-doc.WriteText(w, &gofastcore.RenderOptions{
-    ExcludeHidden: gofastcore.HiddenAny &^ gofastcore.HiddenTextLayer,
-})
+// Hidden content only, keeping the no-ink text layer of scanned pages:
+doc.WriteText(w, &gofastcore.RenderOptions{ExcludeDisplay: gofastcore.DisplayHidden})
 ```
 
-Exclusion cuts exactly the flagged ranges, so smuggled invisible characters are stripped while the visible sentence around them stays.
+Exclusion cuts exactly the ranges that carry the reason.
 
 ### For extractor authors
 
-1. Set the reasons only your format can know, on the block, span, table region or part.
-2. Never merge hidden text into a visible block without marking the range.
-3. Call `part.MarkHidden()` once per finished part, including a failed or blank one. It runs the invisible-character scan, copies `Part.Hidden` to the blocks, adds the `text.hidden` warning and makes an empty blocks list non-nil. `Validate` fails if it was skipped.
-4. Set `doc.HiddenChecked` to the reasons you checked completely in this run, always including `HiddenChars`. List a reason only if its full check ran: one that depends on `Options.DeepHidden` is listed only when that option was set and the check exists.
-5. Cheap checks always run. Checks that need extra work (knowing what is drawn behind or over the text) run when `Options.DeepHidden` is set. Document which is which. A run with `DeepHidden` knows more, and may also take back a flag that the cheap check gives: go-fast-pdf's cheap contrast check takes text drawn on an unpainted page for text on white, and its deep check sees when a background is painted around that text afterwards.
-6. Metadata strings cannot carry a block flag. If `InvisibleChars` finds something in one, add a document-level `text.hidden` warning.
+1. Set a reason only where your format declares it (the rule above), on the block, span, table region or part. List those declarations in your README, and say plainly that colour, size, position and overlap are not judged.
+2. Never merge declared content into another block without marking the range.
+3. Call `part.Finish()` once per finished part, including a failed or blank one. It copies `Part.Display` to the blocks and makes an empty blocks list non-nil. `Validate` fails if it was skipped.
+4. Don't remove or flag invisible characters, and never describe output as safe, suspicious or malicious.
 
 ## Extractor interface
 
@@ -325,7 +272,6 @@ type Extractor interface {
 | `Workers` | Goroutines inside one document; 0 means all CPUs |
 | `Images` | `ImagesMeta`, the default: a block for every image, with its place, size and alternative text. `ImagesData`: the bytes too. `ImagesNone`: no image blocks, and so no alternative text |
 | `Spans` | Ask for inline formatting and links |
-| `DeepHidden` | Also run the hidden-text checks that cost extra work (contrast against drawn backgrounds, occlusion, clipping) |
 | `Password` | Tried on encrypted input, and passed down to embedded documents |
 | `Keys` | Private keys (`crypto.Decrypter`) tried on input encrypted for a certificate: the one whose public half matches a recipient the file names. Passed down like `Password` |
 | `Cells` | Ask for the formulas, types and stored values of table cells in `Table.Cells` |
@@ -425,7 +371,7 @@ The PDF library needs a baseline layout stage (lines, paragraphs, column order) 
 
 ```json
 {
-  "schema_version": "0.1",
+  "schema_version": "0.2",
   "source": {"format": "pdf", "name": "report.pdf"},
   "metadata": {"title": "Q3 Report", "authors": ["A. Writer"]},
   "outline": [{"title": "Q3 Report", "level": 1, "part": 1, "y": 72}],

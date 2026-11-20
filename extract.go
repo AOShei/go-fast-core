@@ -76,16 +76,8 @@ type Options struct {
 	Images ImageMode
 
 	// Spans asks for inline formatting and links in Block.Spans. Spans
-	// that mark hidden text are produced whether or not this is set.
+	// that carry a Display reason are produced whether or not this is set.
 	Spans bool
-
-	// DeepHidden asks for the hidden-text checks that cost extra work,
-	// typically those that need to know what is drawn behind or over the
-	// text: HiddenLowContrast against a drawn background, HiddenOccluded,
-	// HiddenClipped. The checks an extractor gets for free from text
-	// state (invisible, tiny, off-page, transparent, invisible
-	// characters) always run. Each extractor documents which is which.
-	DeepHidden bool
 
 	// Password is tried on encrypted input. It is also passed down to
 	// embedded documents, which is what opens an encrypted attachment of

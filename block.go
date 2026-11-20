@@ -45,13 +45,13 @@ type Block struct {
 	// on every such block.
 	Origin Origin `json:"origin,omitempty"`
 
-	// Hidden lists every reason why text in this block is not visible to
-	// a reader of the source; zero means none was found. A reason that
-	// also appears on a span, or on a HiddenCells region of a table,
+	// Display lists every reason the file declares why content in this
+	// block is not shown or not inked; zero means it declares none, which
+	// says nothing about whether a reader can see the text. A reason that
+	// also appears on a span, or on a DisplayCells region of a table,
 	// applies only there; any other reason applies to the whole block. See
-	// HiddenWhole and VisibleText. Hidden text is never dropped: it is
-	// extracted and flagged.
-	Hidden Hidden `json:"hidden,omitempty"`
+	// DisplayWhole and DisplayedText. Such content is never dropped.
+	Display Display `json:"display,omitempty"`
 
 	// Continued marks a block that continues the nearest block of the
 	// same kind before it: the last one of the preceding part, as with
@@ -74,9 +74,9 @@ type Block struct {
 	Marker  string `json:"marker,omitempty"`
 
 	// Spans carries inline formatting and links over Text, and marks the
-	// ranges that are hidden. Formatting and links are optional and only
-	// produced when Options.Spans is set; spans with Hidden set are always
-	// produced.
+	// ranges the file declares not shown or not inked. Formatting and links
+	// are optional and only produced when Options.Spans is set; spans with
+	// Display set are always produced.
 	Spans []Span `json:"spans,omitempty"`
 
 	Table *Table `json:"table,omitempty"`
@@ -120,8 +120,8 @@ const (
 	AttrAxisX = "x_axis"
 	AttrAxisY = "y_axis"
 	// AttrStored says what kind of stored, never-shown data a block is:
-	// one of the Stored* values. Such a block is not flagged hidden for
-	// being stored; see HiddenInvisible.
+	// one of the Stored* values. It records where the text came from; it
+	// sets no Display reason.
 	AttrStored = "stored"
 	// AttrNotation is the notation of a KindFormula block: one of the
 	// Notation* values.
@@ -152,6 +152,10 @@ const (
 	// StoredFormField: a field of a form that is shown on no page, such as
 	// a PDF form field with no widget.
 	StoredFormField = "form_field"
+	// StoredAfterEnd: data that follows the logical end of the file (after
+	// an RTF document's closing brace, after a PDF's last %%EOF, appended
+	// to a zip archive). The part also carries WarnInputTrailingData.
+	StoredAfterEnd = "after_end"
 )
 
 // Values of Attrs[AttrNotation].
@@ -173,8 +177,9 @@ const (
 	// NoteSpeaker is the speaker's notes of a slide.
 	NoteSpeaker = "speaker"
 	// NoteField is the instruction of a field whose result is in the text
-	// ("HYPERLINK ...", "MERGEFIELD Name"). It follows its paragraph and is
-	// flagged HiddenInvisible: the instruction is never shown.
+	// ("HYPERLINK ...", "MERGEFIELD Name"). It follows its paragraph. The
+	// instruction is never shown, but that is what a field is, not a
+	// declaration: the note sets no Display reason.
 	NoteField = "field"
 	// NoteChoices is the list of values a control offers to choose from:
 	// the drop-down of a spreadsheet cell (a data validation list), a
@@ -186,7 +191,7 @@ const (
 	// the control, or for a sheet stands at the place of the cells it is
 	// for (Loc.Range), with the control's name in Attrs[AttrField] where
 	// the source names it. The values are shown to a reader who opens the
-	// list, so the block is not flagged hidden for that alone.
+	// list; the note sets no Display reason.
 	NoteChoices = "choices"
 )
 
@@ -223,7 +228,8 @@ type Rect struct {
 }
 
 // Span marks the range [Start, End) of Block.Text with inline styling, a
-// link target, or the reasons that range is hidden. Spans may overlap.
+// link target, or the reasons the file declares that range not shown or
+// not inked. Spans may overlap.
 //
 // Start and End are byte offsets into the UTF-8 text, not character
 // offsets, and always fall on character boundaries. A consumer in a
@@ -235,9 +241,9 @@ type Span struct {
 	End   int    `json:"end"`
 	Style Style  `json:"style,omitempty"`
 	Href  string `json:"href,omitempty"`
-	// Hidden gives the reasons this range is not visible when only part
-	// of the block is hidden. Every reason here is also in Block.Hidden.
-	Hidden Hidden `json:"hidden,omitempty"`
+	// Display gives the reasons declared for this range when they apply to
+	// only part of the block. Every reason here is also in Block.Display.
+	Display Display `json:"display,omitempty"`
 }
 
 // Table is a rectangular grid of cell text. Every row has the same number
@@ -251,10 +257,10 @@ type Table struct {
 	HeaderRows int        `json:"header_rows,omitempty"`
 	Rows       [][]string `json:"rows"`
 	Merges     []Merge    `json:"merges,omitempty"`
-	// Hidden marks the cells that are hidden when only part of the table
-	// is: a hidden row or column, a cell with white text. Every reason
-	// here is also in Block.Hidden.
-	Hidden []HiddenCells `json:"hidden,omitempty"`
+	// Display marks the cells the file declares not shown or not inked
+	// when that is only part of the table: a hidden row or column. Every
+	// reason here is also in Block.Display.
+	Display []DisplayCells `json:"display,omitempty"`
 	// Cells holds what some cells have besides the text they display, in
 	// order of row, then column; a cell with nothing more has no entry.
 	// Links come with Options.Spans; formulas, types and stored values

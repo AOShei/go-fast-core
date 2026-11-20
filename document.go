@@ -40,12 +40,13 @@
 //     with Continued set on the later pieces.
 //   - Partial extraction returns a Document with warnings, not an error.
 //     Errors are for input that yields nothing usable.
-//   - Hidden text is extracted and flagged, never dropped; see Hidden.
-//     Every extractor calls Part.MarkHidden on each finished part and
-//     records in Document.HiddenChecked which reasons it fully checked.
+//   - Content the file declares not shown or not inked is extracted like
+//     any other and carries the reason (Display), never dropped. Nothing
+//     else about visibility is judged. Every extractor calls Part.Finish
+//     on each finished part.
 //   - Lists that consumers iterate are never nil: Document.Parts,
 //     Part.Blocks and Table.Rows. JSON then has [] where a list is empty,
-//     never null, at no encoding cost. New and Part.MarkHidden take care
+//     never null, at no encoding cost. New and Part.Finish take care
 //     of the first two; a table has at least one row.
 //   - Output is deterministic: the same input and options give the same
 //     Document whatever Options.Workers is, including where a limit
@@ -90,7 +91,11 @@ import (
 // when a field is removed or its meaning changes. Additions, including new
 // block kinds, do not change it: decoders map names they do not know to
 // the Unknown value of the enum.
-const SchemaVersion = "0.1"
+//
+// 0.2 (2026-11-20): Hidden became Display, with only the reasons a file
+// declares ("hidden", "no_ink"); hidden_checked and the text.hidden
+// warning were removed.
+const SchemaVersion = "0.2"
 
 // Document is the output of every go-fast-* extractor.
 type Document struct {
@@ -98,17 +103,8 @@ type Document struct {
 	Source        Source        `json:"source"`
 	Metadata      Metadata      `json:"metadata,omitzero"`
 	Outline       []OutlineItem `json:"outline,omitempty"`
-	// HiddenChecked is the audit record for hidden text: the reasons for
-	// which this extraction ran its complete check. For a reason listed
-	// here, a block without that flag was looked at and nothing was
-	// found, as far as this extractor is able to tell (its documentation
-	// states the limits). A reason not listed was not checked, or only in
-	// part: it may still appear on a block where a cheaper check happened
-	// to find it, but its absence says nothing. HiddenChars is always
-	// listed, because Part.MarkHidden is mandatory.
-	HiddenChecked Hidden      `json:"hidden_checked,omitempty"`
-	Parts         []Part      `json:"parts"`
-	Children      []*Document `json:"children,omitempty"`
+	Parts         []Part        `json:"parts"`
+	Children      []*Document   `json:"children,omitempty"`
 	// Warnings holds problems that concern the document as a whole.
 	// Problems local to a part are in Part.Warnings.
 	Warnings []Warning `json:"warnings,omitempty"`
@@ -192,10 +188,10 @@ type Part struct {
 	// UserUnit are applied, in points. Zero when the part has no geometry.
 	Width  float64 `json:"width,omitempty"`
 	Height float64 `json:"height,omitempty"`
-	// Hidden gives the reasons the whole part is not shown to a reader: a
+	// Display gives the reasons the file declares for the whole part: a
 	// hidden sheet or slide. Every block of the part carries the same
-	// reasons (MarkHidden copies them).
-	Hidden   Hidden    `json:"hidden,omitempty"`
+	// reasons (Finish copies them).
+	Display  Display   `json:"display,omitempty"`
 	Blocks   []Block   `json:"blocks"`
 	Warnings []Warning `json:"warnings,omitempty"`
 }

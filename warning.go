@@ -36,20 +36,6 @@ const (
 	// source and appears as U+FFFD or is absent.
 	WarnTextUnmappedGlyphs = "text.unmapped_glyphs"
 
-	// WarnTextHidden: the part contains text that a reader of the source
-	// cannot see; the blocks concerned carry the reasons in Block.Hidden.
-	// One per part, added by Part.MarkHidden. Severity info when the only
-	// reason is the text layer of a scanned page, warning otherwise. On a
-	// document it means a metadata string contains invisible characters.
-	WarnTextHidden = "text.hidden"
-
-	// WarnTextUnshownOutlier: the part holds routine unshown data (a
-	// comment, an attribute, a field instruction, a document variable, a
-	// mail header) that is out of proportion for its kind (see
-	// UnshownOutlier). The blocks concerned are flagged HiddenInvisible.
-	// The message says how many items and of what kind.
-	WarnTextUnshownOutlier = "text.unshown_outlier"
-
 	// WarnTextTrackedChanges: the part has tracked changes. Its text is
 	// given as if all were accepted; each deletion is kept as a note block
 	// of type NoteDeletion.
@@ -89,6 +75,13 @@ const (
 	// twice in two ways, or has two members with one name. Which reading
 	// this extractor takes is in its documentation.
 	WarnInputAmbiguous = "input.ambiguous"
+
+	// WarnInputTrailingData: data follows the logical end of the file
+	// (after an RTF document's closing brace, after a PDF's last %%EOF,
+	// appended to a zip archive). Its text is in the stored part with
+	// Attrs[AttrStored] = StoredAfterEnd. The message says how many bytes
+	// follow the end.
+	WarnInputTrailingData = "input.trailing_data"
 
 	// WarnLimitExceeded: a limit from Options.Limits was reached during
 	// extraction and the output is truncated at that point. Severity

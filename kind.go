@@ -110,10 +110,10 @@ const (
 	// PartStored holds what belongs to the file as a whole and to no
 	// page, sheet or slide, and is shown on none: macro code, document
 	// variables, custom XML data, defined names. A document has at most
-	// one, after its other parts and numbered after them. It is not hidden
-	// as a whole: files routinely store such data, so a flag on all of it
-	// would tell nothing. The renderers leave it out unless
-	// RenderOptions.Stored is set. Options.Parts
+	// one, after its other parts and numbered after them. It carries no
+	// part-level Display reason: being stored says where text came from,
+	// not what the file declares about its display. The renderers leave it
+	// out unless RenderOptions.Stored is set. Options.Parts
 	// selects it only with the whole document (the zero range); a reader
 	// that gives parts one at a time gives it last, after the others.
 	PartStored
