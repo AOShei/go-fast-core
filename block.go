@@ -121,7 +121,10 @@ const (
 	AttrAxisY = "y_axis"
 	// AttrStored says what kind of stored, never-shown data a block is:
 	// one of the Stored* values. It records where the text came from; it
-	// sets no Display reason.
+	// sets no Display reason. Such a block is usually in the stored part,
+	// but stored data that belongs to a page, sheet or slide (a PDF page's
+	// scripts) stays in that part. The renderers leave out every block
+	// marked stored, wherever it is, unless RenderOptions.Stored is set.
 	AttrStored = "stored"
 	// AttrNotation is the notation of a KindFormula block: one of the
 	// Notation* values.
