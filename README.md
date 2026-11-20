@@ -325,6 +325,10 @@ doc.Children = append(doc.Children, opts.ExtractChild(ctx, name, mime, reader, s
 
 `ExtractChild` always returns a document, so every embedded file is at least listed with its name and size. When the child was not extracted, the result has no parts and one warning whose code says why: `child.not_extracted` (no `Child` supplied, or depth limit reached), `child.unsupported`, `child.encrypted` or `child.failed`. The last three are chosen from the error the child extractor returned, so a dispatcher should return `ErrUnsupported` for formats it has no extractor for.
 
+The renderers leave children out unless `RenderOptions.Children` is set. Then each child follows the document's own parts, depth first, after a line that names it (`<!-- child 2: report.pdf -->` in Markdown, `[child 2: report.pdf]` in text; a nested child is `child 2.1`), and the same options apply to it. JSON always has the children.
+
+A library never imports another extractor. A command (`cmd/gofast<lib>`) may, to build its `Child` dispatcher: go-fast-email's command hands HTML and RTF bodies to go-fast-html and go-fast-rtf. The library's package still imports only core and the standard library; the module's `go.mod` lists the other extractors because its command needs them.
+
 ## Schema evolution
 
 `schema_version` changes when a field is removed or its meaning changes. Additions do not change it, including new block kinds: a decoder that meets a kind, part kind, origin or severity it does not know maps it to that enum's `Unknown` value, and unknown style names are ignored. An unknown block renders as a paragraph. Re-encoding such a document writes `"unknown"`, so the original name is lost. `Validate` rejects `Unknown`, since extractors must never emit it.

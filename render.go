@@ -27,6 +27,13 @@ type RenderOptions struct {
 	// DisplayNoInk also leaves out the searchable text layer of scanned
 	// PDF pages, which would then render empty.
 	ExcludeDisplay Display
+	// Children renders the documents in Document.Children after the
+	// document's own parts, depth first, each after a line that names it:
+	// "<!-- child 2: report.pdf -->" in Markdown, "[child 2: report.pdf]"
+	// in plain text. A nested child is numbered by its path ("child 2.1").
+	// A child that was listed but not extracted gives its line only. The
+	// same options apply to every child.
+	Children bool
 }
 
 // Markdown renders the document (not its children) as Markdown with
@@ -74,10 +81,49 @@ func (d *Document) render(w io.Writer, opts *RenderOptions, md bool) error {
 	if opts != nil {
 		r.opts = *opts
 	}
+	r.doc(d, "", 0)
+	return r.finish()
+}
+
+// maxRenderDepth bounds the recursion into Children, for a tree built by
+// hand with a cycle in it; extractors' own depth limits are far lower.
+const maxRenderDepth = 64
+
+func (r *renderer) doc(d *Document, path string, depth int) {
 	for i := range d.Parts {
 		r.part(&d.Parts[i])
 	}
-	return r.finish()
+	if !r.opts.Children || depth >= maxRenderDepth {
+		return
+	}
+	for i, c := range d.Children {
+		if c == nil {
+			continue
+		}
+		n := path + strconv.Itoa(i+1)
+		label := "child " + n
+		switch {
+		case c.Source.Name != "":
+			label += ": " + oneLine(c.Source.Name)
+		case c.Source.Format != "":
+			label += ": " + c.Source.Format
+		}
+		r.marker(label)
+		r.doc(c, n+".", depth+1)
+	}
+}
+
+// marker writes a line that says where the following text comes from.
+func (r *renderer) marker(label string) {
+	if r.any {
+		r.w.WriteString("\n\n")
+	}
+	if r.md {
+		r.w.WriteString("<!-- " + strings.ReplaceAll(label, "--", "- -") + " -->")
+	} else {
+		r.w.WriteString("[" + label + "]")
+	}
+	r.any, r.prev = true, KindInvalid
 }
 
 func (p *Part) render(md bool) string {
@@ -114,19 +160,11 @@ func (r *renderer) part(p *Part) {
 		return
 	}
 	if r.opts.PartMarkers {
-		if r.any {
-			r.w.WriteString("\n\n")
-		}
 		label := p.Kind.String() + " " + strconv.Itoa(p.Number)
 		if p.Name != "" {
 			label += ": " + oneLine(p.Name)
 		}
-		if r.md {
-			r.w.WriteString("<!-- " + strings.ReplaceAll(label, "--", "- -") + " -->")
-		} else {
-			r.w.WriteString("[" + label + "]")
-		}
-		r.any, r.prev = true, KindInvalid
+		r.marker(label)
 	}
 	for i := range p.Blocks {
 		r.block(&p.Blocks[i])
