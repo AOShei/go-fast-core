@@ -54,7 +54,7 @@ A block has a `Kind`, usually `Text`, and kind-specific fields:
 | `header`, `footer` | running page header/footer | | |
 | `thematic_break` | empty | | |
 
-A `thematic_break` is a break between topics or scenes that the source declares: an HTML `<hr>`, a Markdown `---`, a Word horizontal-line paragraph. It is a boundary a chunker can split on. It has no text, is never `Continued`, and `Markdown()` writes it as `---`; `Text()` writes nothing for it, since blocks are already separated by a blank line. Page, column and section breaks are layout, not content, and are not emitted as blocks: a paged format already has its pages as parts.
+A `thematic_break` is a break between topics or scenes that the source declares: an HTML `<hr>`, a Markdown `---`, Word's horizontal line. It is always `native`: a bordered or ruled paragraph, a drawn line or a row of asterisks is formatting, not a declared break, and no break is inferred from it (`Validate` rejects an `inferred` one). It is a boundary a chunker can split on. It has no text, is never `Continued`, and `Markdown()` writes it as `---`; `Text()` writes nothing for it, since blocks are already separated by a blank line. Page, column and section breaks are layout, not content, and are not emitted as blocks: a paged format already has its pages as parts.
 
 Every block may also carry:
 

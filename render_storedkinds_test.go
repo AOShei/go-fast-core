@@ -65,3 +65,15 @@ func TestValidateFieldNoteStored(t *testing.T) {
 		t.Errorf("marked field note: %v", err)
 	}
 }
+
+func TestValidateThematicBreakNative(t *testing.T) {
+	d := New("rtf")
+	d.Parts = []Part{{Kind: PartBody, Number: 1, Blocks: []Block{{Kind: KindThematicBreak, Origin: OriginInferred}}}}
+	if err := d.Validate(); err == nil || !strings.Contains(err.Error(), "never inferred") {
+		t.Errorf("inferred break: %v", err)
+	}
+	d.Parts[0].Blocks[0].Origin = OriginNative
+	if err := d.Validate(); err != nil {
+		t.Errorf("native break: %v", err)
+	}
+}

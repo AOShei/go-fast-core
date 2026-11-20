@@ -248,6 +248,9 @@ func (v *validator) block(b *Block, bp string) {
 		if b.Continued {
 			v.bad("%s: thematic break cannot be continued", bp)
 		}
+		if b.Origin != OriginNative {
+			v.bad("%s: a thematic break is declared by the source, never inferred", bp)
+		}
 	}
 
 	for k, s := range b.Spans {

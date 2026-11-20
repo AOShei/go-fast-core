@@ -34,9 +34,12 @@ const (
 	KindHeader
 	KindFooter
 	// KindThematicBreak is a break between topics or scenes that the
-	// source marks as such: an HTML <hr>, a Markdown thematic break.
-	// It has no text. Page, column and section breaks are layout and are
-	// not emitted as blocks.
+	// source marks as such: an HTML <hr>, a Markdown thematic break,
+	// Word's horizontal line. It has no text and is always OriginNative:
+	// a bordered or ruled paragraph, a drawn line or a row of asterisks is
+	// formatting, not a declared break, and no break is inferred from it.
+	// Page, column and section breaks are layout and are not emitted as
+	// blocks.
 	KindThematicBreak
 	kindEnd
 )
