@@ -120,7 +120,8 @@ const (
 	AttrAxisX = "x_axis"
 	AttrAxisY = "y_axis"
 	// AttrStored says what kind of stored, never-shown data a block is:
-	// one of the Stored* values. Such a block is flagged HiddenInvisible.
+	// one of the Stored* values. Such a block is not flagged hidden for
+	// being stored; see HiddenInvisible.
 	AttrStored = "stored"
 	// AttrNotation is the notation of a KindFormula block: one of the
 	// Notation* values.

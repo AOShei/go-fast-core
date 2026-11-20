@@ -166,8 +166,8 @@ func (v *validator) document(d *Document, path string, top bool) {
 			if i != len(d.Parts)-1 {
 				v.bad("%s: a stored part must be the last part", pp)
 			}
-			if p.Hidden&HiddenInvisible == 0 {
-				v.bad("%s: a stored part must be hidden (HiddenInvisible): nothing in it is shown", pp)
+			if p.Hidden != 0 {
+				v.bad("%s: a stored part is not hidden as a whole (Hidden %s); flag the blocks that call for it", pp, p.Hidden)
 			}
 		}
 		if p.Width < 0 || p.Height < 0 {

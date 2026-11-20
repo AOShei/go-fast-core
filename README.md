@@ -81,7 +81,7 @@ Every block may also carry:
 
   `author` and `date` are as the source gives them.
 - **A table's cells can say more than their text** (`Table.Cells`, an entry only for a cell that has something): where the cell links to (`href`, with `Spans`), the formula whose result it shows (`formula`, never evaluated), and the type of the value it stores with the value where the text does not show it in full (`type`: `number`, `date`, `bool`, `error`, `text`; `value`), both with `Options.Cells`. The renderers write the links, never formulas or values: a formula can hold text nobody sees on the sheet.
-- **Data the file stores and never shows** is read as data, never run, evaluated or followed, and flagged `invisible`, with `Attrs["stored"]` saying what it is: `pivot_cache` (the records of a pivot table whose source is gone), `defined_name`, `document_variable`, `custom_xml`, `field_code`, `macro`, `form_field` (a field of a form shown on no page). Nobody who opens the file sees it, so it is a place to put text for a model. What belongs to the file and to no page, sheet or slide goes in a part of kind `stored`: at most one, the last, with `Part.Hidden` `invisible`; `Options.Parts` selects it only with the whole document, and a reader that gives parts one at a time gives it last.
+- **Data the file stores and never shows** is read as data, never run, evaluated or followed, with `Attrs["stored"]` saying what it is: `pivot_cache` (the records of a pivot table whose source is gone), `defined_name`, `document_variable`, `custom_xml`, `field_code`, `macro`, `form_field` (a field of a form shown on no page). It is **not** flagged hidden for being stored: nearly every file stores some such data, so the flag would tell nothing (see [What earns a flag](#what-earns-a-flag)). What belongs to the file and to no page, sheet or slide goes in a part of kind `stored`: at most one, the last, not hidden as a whole. The renderers leave it out unless `RenderOptions.Stored` is set. `Options.Parts` selects it only with the whole document, and a reader that gives parts one at a time gives it last.
 - **The value of a form field or control** that its own appearance does not show (a PDF form field, a Word form field or content control) is a block at its place, with the field's name in `Attrs["field"]` (`AttrField`).
 - **Heading levels are 1 to 6.** A source with deeper levels (Word has nine) has them clamped to 6, with the real level in `Attrs["level"]`, and the part carries the `structure.heading_level_clamped` warning at severity `info`. Levels above six are not allowed because Markdown has none.
 
@@ -210,13 +210,21 @@ Text that a reader of the source cannot see still reaches whatever consumes the 
 
 The go-fast libraries do not decide which it is. They **extract hidden text like any other and flag it with the reason it is not visible**, so the caller can review, quarantine or exclude it.
 
+### What earns a flag
+
+**The flag is a signal of suspicious hiding, not a label for everything a reader does not see.** It is set where a hiding mechanism is applied to content that would otherwise be seen: hidden formatting (`display:none`, Word's hidden text, RTF `\v`), text in the colour of its background, text too small to read, a 1-pixel box holding 400 words, text placed off the page or under a picture, a hidden sheet or row, invisible characters.
+
+Data that files routinely keep and never display is extracted, bounded and **not** flagged: metadata, mail headers, comments in markup, accessibility and tooltip attributes, field instructions, index entries, scripts, macro code, form values. Almost every file has some, so a flag on it would be set on clean and poisoned files alike and tell them apart in neither. An extractor flags such data only where it is **out of proportion** for its kind: far longer than that kind of data usually is (as a guide, more than about 30 words where a few are usual), like a tooltip holding a paragraph of instructions. It flags it `invisible` and states in a warning what it found.
+
+Before adding a check, ask whether most clean files of the format would trip it. If they would, it is not a signal.
+
 **A flag is evidence that text is hidden. No flag is not evidence that a document is safe.** An extractor cannot see text inside images, a font whose glyphs display one thing and map to another, or visibility controlled by external stylesheets and scripts.
 
 ### Reasons
 
 | Reason | Meaning |
 |---|---|
-| `invisible` | The source marks the text as not displayed: PDF invisible render mode or a layer that is off; Word hidden-text formatting; a hidden slide, sheet, row or column; HTML `display:none`, `visibility:hidden`, `hidden`. Also data the file stores and never displays (`Attrs["stored"]`) |
+| `invisible` | The source marks the text as not displayed: PDF invisible render mode or a layer that is off; Word hidden-text formatting; a hidden slide, sheet, row or column; HTML `display:none`, `visibility:hidden`, `hidden`. Also routine unshown data that is out of proportion for its kind (see above) |
 | `text_layer` | Unpainted text lying within an image that covers at least half of its page (`HiddenTextLayerCoverage`), which is how a scanned page's searchable text is stored. Nothing verifies that it matches the image. It stands alone: see below |
 | `tiny` | Displayed smaller than 2 points (`HiddenTinySize`) |
 | `low_contrast` | Text color indistinguishable from what is behind it: WCAG contrast ratio under 1.2 (`HiddenContrastRatio`) and neither red nor green more than 32 of 255 apart (`HiddenColorDistance`), which is what `LowContrast` tests. The ratio compares brightness alone: green on red of the same brightness is in plain view and is not flagged. A difference in blue alone does not make text legible, so yellow or cream on white is flagged |

@@ -14,6 +14,10 @@ type RenderOptions struct {
 	// Furniture includes running headers and footers, which are dropped
 	// by default.
 	Furniture bool
+	// Stored includes the stored part (macro code, defined names, document
+	// variables and other data the file shows nowhere), which is left out
+	// by default.
+	Stored bool
 	// PartMarkers emits a line before each part so that positions survive
 	// in the rendered text: "<!-- page 3 -->" in Markdown, "[page 3]" in
 	// plain text.
@@ -106,7 +110,7 @@ func (r *renderer) finish() error {
 }
 
 func (r *renderer) part(p *Part) {
-	if p.Hidden&r.opts.ExcludeHidden != 0 {
+	if p.Hidden&r.opts.ExcludeHidden != 0 || p.Kind == PartStored && !r.opts.Stored {
 		return
 	}
 	if r.opts.PartMarkers {

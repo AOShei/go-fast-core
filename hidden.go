@@ -32,11 +32,11 @@ const (
 	// invisible render mode or a layer that is off by default; Word
 	// hidden-text formatting; a hidden slide, sheet, row or column; a cell
 	// format that blanks the value; HTML display:none, visibility:hidden
-	// or the hidden attribute. Also data the file stores and never
-	// displays: a pivot cache whose source is gone, document variables,
-	// the instructions of fields, macro code (Attrs[AttrStored] says
-	// which). Nobody who opens the file sees it, so it is a place to put
-	// text for a model.
+	// or the hidden attribute. Data that files routinely store and never
+	// display (metadata, document variables, field instructions, macro
+	// code; Attrs[AttrStored]) is not flagged for that alone, since nearly
+	// every file has some and the flag would tell nothing; an extractor
+	// flags it only where it is out of proportion for its kind.
 	HiddenInvisible Hidden = 1 << iota
 	// HiddenTextLayer: the text is not painted and lies within an image
 	// that covers at least HiddenTextLayerCoverage of its page, which is

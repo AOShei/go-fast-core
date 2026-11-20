@@ -1073,7 +1073,7 @@ func TestValidateStoredPart(t *testing.T) {
 		return d
 	}
 	body := Part{Kind: PartBody, Number: 1, Blocks: []Block{{Kind: KindParagraph, Text: "x"}}}
-	stored := Part{Kind: PartStored, Number: 2, Hidden: HiddenInvisible,
+	stored := Part{Kind: PartStored, Number: 2,
 		Blocks: []Block{{Kind: KindCode, Text: "Sub Auto_Open()", Attrs: map[string]string{AttrStored: StoredMacro}}}}
 	if err := doc(body, stored).Validate(); err != nil {
 		t.Errorf("valid: %v", err)
@@ -1083,11 +1083,22 @@ func TestValidateStoredPart(t *testing.T) {
 	if doc(notLast, Part{Kind: PartBody, Number: 3, Blocks: []Block{}}).Validate() == nil {
 		t.Error("a stored part before another was accepted")
 	}
-	shown := stored
-	shown.Hidden = 0
-	shown.Blocks = []Block{{Kind: KindCode, Text: "x"}}
-	if doc(body, shown).Validate() == nil {
-		t.Error("a stored part that is not hidden was accepted")
+	hidden := stored
+	hidden.Hidden = HiddenInvisible
+	if doc(body, hidden).Validate() == nil {
+		t.Error("a stored part hidden as a whole was accepted")
+	}
+	// The renderers leave the stored part out unless asked for it.
+	d := doc(body, stored)
+	if strings.Contains(d.Markdown(), "Auto_Open") || strings.Contains(d.Text(), "Auto_Open") {
+		t.Error("stored part rendered by default")
+	}
+	var md strings.Builder
+	if err := d.WriteMarkdown(&md, &RenderOptions{Stored: true}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(md.String(), "Sub Auto_Open()") {
+		t.Errorf("stored part missing with Stored: %q", md.String())
 	}
 	if b, _ := json.Marshal(PartStored); string(b) != `"stored"` {
 		t.Errorf("json %s", b)
