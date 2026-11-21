@@ -2,20 +2,23 @@
 
 The shared document model and extractor interface for the go-fast-* extraction libraries. Standard library only.
 
-Every extractor (`go-fast-pdf`, and later ooxml, html, email, ...) returns the same `*gofastcore.Document`, so chunkers, indexers and knowledge-graph builders are written once and work for every format.
+Every extractor (`go-fast-pdf`, `go-fast-ooxml`, `go-fast-odf`, `go-fast-html`, `go-fast-rtf`, `go-fast-email`) returns the same `*gofastcore.Document`, so chunkers, indexers and knowledge-graph builders are written once and work for every format.
 
 ```go
 import "github.com/AOShei/go-fast-core" // package gofastcore
 ```
 
-**Status: schema version 0.2.** Version 0.1 was agreed with the PDF extractor over two review rounds on 2026-11-18. Version 0.2 (2026-11-20) replaced the hidden-text verdicts with what a file declares about display; see [What the file declares](#what-the-file-declares). Not yet tagged. It will be tagged v0.1.0 once `go-fast-pdf` has been ported to it.
+**Status: module v0.1.0, schema version 0.2.** The module version is the Go module's tag; the schema version is the `schema_version` in every document and changes only as [Schema evolution](#schema-evolution) says. Schema 0.1 was agreed with the PDF extractor over two review rounds on 2026-11-18. Schema 0.2 (2026-11-20) replaced the hidden-text verdicts with what a file declares about display; see [What the file declares](#what-the-file-declares). Changes are in [CHANGELOG.md](CHANGELOG.md).
 
 ## Series conventions
 
 - **Naming.** Every package carries the brand prefix: `gofastcore`, `gofastpdf`, `gofasthtml`. No package in the series shares a name with a standard library package, so callers never need an import alias.
 - **Layout.** A library's public API is in its module root. Implementation goes under `internal/`, the CLI under `cmd/`. No `pkg/` directory.
-- **Format-specific settings.** `Options` holds only what every format understands. Settings for one format (for PDF: memory mapping, a cache budget) are fields on that library's extractor value: `gofastpdf.Extractor{...}.Extract(...)`.
-- **Dependencies.** The standard library and other go-fast modules only. `go-fast-core` itself imports only the standard library. Any other dependency must be challenged.
+- **Format-specific settings.** `Options` holds only what every format understands. Settings for one format (for PDF: memory mapping, a cache budget) are fields on that library's extractor value: `(&gofastpdf.Extractor{...}).Extract(...)`.
+- **Dependencies.** `go-fast-core` imports only the standard library. A library's package imports only the standard library and `go-fast-core`, never another extractor; its command may import other go-fast extractors to hand on embedded documents (see [Embedded documents](#embedded-documents)). Any other dependency must be challenged.
+- **Pinned versions.** A library requires `go-fast-core`, and a command other go-fast modules, at a tag or at the pseudo-version of a pushed commit. No `replace` directive or `go.work` file is committed.
+- **Bounded input.** Every input is read within `Options.Limits`: what a file decides (its size, how much it decompresses to, how much text it becomes, how many parts and how deep its embedded documents go) is bounded. Reaching a bound truncates the document with a `limit.exceeded` warning, or is `ErrLimitExceeded` when there is no document yet.
+- **Nothing fetched or run.** The libraries never run what a file contains (macros, scripts, actions) and never fetch or send anything a file refers to. They report that it is there (`input.active_content`, `input.external_reference`).
 - **Layering.** The shared model is the common denominator across formats. An extractor may offer a richer native API beside it (for PDF: word and line boxes, font names and sizes, glyph positions). Those details stay out of core.
 - **Preserve content.** Anything that is real content, whether it carries meaning or provides context, is preserved where possible. Normalizing a representation is fine (a ligature to its letters, `\r\n` to `\n`); dropping or flattening something the author put there is not. This is why tabs are kept in text, running headers and footers are tagged instead of removed, and an attachment that cannot be extracted is still listed.
 - **Report what the file declares; never judge.** Content the file says is not shown, or draws with no ink, is extracted like any other and carries that declaration. The libraries do not judge whether text is visible, suspicious or safe. See [What the file declares](#what-the-file-declares).
@@ -54,7 +57,7 @@ A block has a `Kind`, usually `Text`, and kind-specific fields:
 | `header`, `footer` | running page header/footer | | |
 | `thematic_break` | empty | | |
 
-A `thematic_break` is a break between topics or scenes that the source declares: an HTML `<hr>`, a Markdown `---`, Word's horizontal line. It is always `native`: a bordered or ruled paragraph, a drawn line or a row of asterisks is formatting, not a declared break, and no break is inferred from it (`Validate` rejects an `inferred` one). It is a boundary a chunker can split on. It has no text, is never `Continued`, and `Markdown()` writes it as `---`; `Text()` writes nothing for it, since blocks are already separated by a blank line. Page, column and section breaks are layout, not content, and are not emitted as blocks: a paged format already has its pages as parts.
+A `thematic_break` is a break between topics or scenes that the source declares: an HTML `<hr>`, a Markdown `---`, Word's horizontal line, an empty paragraph in LibreOffice's Horizontal Line paragraph style (`Horizontal_20_Line`, which is how LibreOffice writes an `<hr>`). A named style counts as a declaration, as a heading style does. It is always `native`: a bordered or ruled paragraph, a drawn line or a row of asterisks is formatting, not a declared break, and no break is inferred from it (`Validate` rejects an `inferred` one). It is a boundary a chunker can split on. It has no text, is never `Continued`, and `Markdown()` writes it as `---`; `Text()` writes nothing for it, since blocks are already separated by a blank line. Page, column and section breaks are layout, not content, and are not emitted as blocks: a paged format already has its pages as parts.
 
 Every block may also carry:
 
@@ -113,7 +116,7 @@ Every block may also carry:
 10. `Document.Parts`, `Part.Blocks` and `Table.Rows` are never nil, so JSON has `[]` and never `null`. A table has at least one row and one column.
 11. Output is deterministic: the same input and options give the same document whatever `Options.Workers` is, including where a limit truncates it.
 
-`doc.Validate()` checks everything mechanical in rules 1, 4, 5 and 7, plus spans, tables, merges, warnings and enum values. Run it on every test fixture and fuzz output:
+`doc.Validate()` checks everything mechanical in rules 1, 4, 5, 7 and 10, and in rule 9 that `part.Finish()` was called, plus spans, tables, merges, warnings, enum values and the closed sets of `stored`, `type` and `role`. Run it on every test fixture and fuzz output:
 
 ```go
 doc, err := gofastpdf.Extract(ctx, f, size, nil)
@@ -169,7 +172,7 @@ Warnings local to a part are in `Part.Warnings`; those about the whole file are 
 | Severity | Meaning |
 |---|---|
 | `info` | Something notable happened; the output is complete |
-| `warning` | The output is present but degraded, or may not represent what a reader of the source would see |
+| `warning` | The output is present but incomplete or degraded, or it is one of more than one way the input can be read |
 | `error` | Content is missing or untrustworthy |
 
 Shared codes (constants `Warn*`):
@@ -194,7 +197,7 @@ Shared codes (constants `Warn*`):
 | `child.encrypted` | The embedded document is encrypted and was not opened (no password, the wrong one, or no key for the certificate it is encrypted for) |
 | `child.failed` | Extraction of an embedded document failed for any other reason |
 
-An extractor may add codes of its own under a format prefix, such as `pdf.xref_rebuilt`.
+An extractor may add codes of its own under a format prefix, such as `pdf.font_missing`.
 
 This is how a caller handles scanned pages without go-fast knowing anything about OCR:
 
@@ -350,41 +353,17 @@ render.Apply(ro)
 
 ## How each format maps
 
-| Format | Part kind | Notes |
+| Format (library) | Part kind | Notes |
 |---|---|---|
-| pdf | `page` | `BBox` on blocks; structure is `inferred` unless the PDF is tagged or the outline confirms a heading |
-| docx, odt, rtf | one `body` | Heading styles and outline levels give levels; numbered headings and list items carry `Marker`; comments, tracked deletions, field instructions and the values of drop-down controls become `note`; `Loc.Anchor` is the paragraph id |
-| pptx, odp | `slide` | `Name` is the slide title; speaker notes become `note` |
-| xlsx, ods, csv | `sheet` | `Name` is the sheet name; each used region is a `table` with `Loc.Range`; drop-down lists become `note` blocks of type `choices`; defined names and macro sheets go to the `stored` part |
-| html, md, txt | one `body` | `Loc.Offset`/`Length` into the source; `Loc.Anchor` from `id` attributes |
-| epub | `chapter` | One per spine item; nav becomes `Outline` |
-| eml, msg, mbox | `message` | Headers in `Metadata.Extra`; attachments in `Children` |
+| pdf (go-fast-pdf) | `page` | `BBox` on blocks; structure is `inferred` unless the PDF is tagged or the outline confirms a heading; `Loc.Anchor` from named destinations and the `/ID` of structure elements |
+| docx (go-fast-ooxml), odt and fodt (go-fast-odf), rtf (go-fast-rtf) | one `body` | Heading styles and outline levels give levels; numbered headings and list items carry `Marker`; comments, tracked deletions, field instructions and the values of drop-down controls become `note`; `Loc.Anchor` is the paragraph id (docx, odt) or the bookmark that starts the paragraph (rtf) |
+| pptx (go-fast-ooxml), odp and fodp (go-fast-odf) | `slide` | `Name` is the slide title; speaker notes become `note` |
+| xlsx (go-fast-ooxml), ods and fods (go-fast-odf) | `sheet` | `Name` is the sheet name; each used region is a `table` with `Loc.Range`; drop-down lists become `note` blocks of type `choices`; defined names and macro sheets go to the `stored` part |
+| html, md, txt (go-fast-html) | one `body` | `Loc.Offset`/`Length` into the source; `Loc.Anchor` from `id` attributes |
+| epub (go-fast-html) | `chapter` | One per spine item; nav becomes `Outline` |
+| eml, msg, mbox, tnef (go-fast-email) | `message` | One part per message. For a single message every header is in `Metadata.Extra`; in a mailbox the headers a mail program does not show are a `note` of type `headers`. Attachments in `Children` |
 
-## Porting go-fast-pdf
-
-This is a clean break: no compatibility shim for the old `pkg/loader` API or JSON.
-
-| Today (`go-fast-pdf/pkg/model`) | Shared model |
-|---|---|
-| `Document.Pages[]` | `Document.Parts[]` with `Kind: PartPage` |
-| `Page.PageNumber` | `Part.Number` (the page's ordinal, also when a range is extracted); a page label such as `iv` goes in `Part.Name` |
-| `Page.Width`, `Height` | `Part.Width`, `Height`, as displayed (CropBox after rotation) |
-| `Page.Content` (one string) | `Part.Blocks[]`; `part.Markdown()` or `part.Text()` gives a string |
-| `Page.CharCount` | Dropped; derivable from the blocks |
-| `Page.Images[]` | `image` blocks placed in reading order |
-| `Image.ID` (`Im1`, page-local) | `Image.ID` from the object number (`obj-12`); synthetic for inline images |
-| `Image.Width`, `Height` | Same, now `int` |
-| `Image.Rect` `[x, y, w, h]`, bottom-left origin | `Block.Loc.BBox`, displayed top-left space |
-| `Image.Type`, `ColorSpace` | `Block.Attrs["inline"]`, `Attrs["color_space"]` |
-| `Metadata.Title`, `Encrypted` | Same names |
-| `Metadata.Author` | `Metadata.Authors`, one entry, not split |
-| PDF `/Keywords` | `Metadata.Keywords`, one entry, not split |
-| `Metadata.Creator` | `Metadata.Application` |
-| `Metadata.Producer` | `Metadata.Extra["producer"]` |
-| PDF bookmarks (not extracted today) | `Document.Outline` |
-| `LoadPDF` / `LoadPDFConcurrent` | `gofastpdf.Extract(ctx, r, size, opts)` |
-
-The PDF library needs a baseline layout stage (lines, paragraphs, column order) before its first release under this model, because of contract rules 2 and 3. Headings, lists, tables and header/footer tagging can follow incrementally without a schema change; until then every text block is a `paragraph` with `OriginInferred`.
+go-fast-ooxml reads the macro and template variants of docx, xlsx and pptx, and binary workbooks (`.xlsb`), under those three format names. Each library's README gives the details. go-fast-pdf's MIGRATION.md maps its API before the shared model to this one.
 
 ## Example output
 
@@ -407,8 +386,11 @@ The PDF library needs a baseline layout stage (lines, paragraphs, column order) 
     },
     {
       "kind": "page", "number": 2, "width": 612, "height": 792,
-      "blocks": [],
-      "warnings": [{"code": "part.image_only", "severity": "warning"}]
+      "blocks": [
+        {"kind": "image", "loc": {"bbox": {"x0": 0, "y0": 0, "x1": 612, "y1": 792}},
+         "image": {"id": "obj-14", "mime": "image/jpeg", "width": 2550, "height": 3300}}
+      ],
+      "warnings": [{"code": "part.image_only", "severity": "warning", "message": "1 image, no text operators"}]
     }
   ],
   "warnings": [{"code": "input.repaired", "severity": "info", "message": "xref rebuilt"}]
@@ -417,6 +399,5 @@ The PDF library needs a baseline layout stage (lines, paragraphs, column order) 
 
 ## Deferred
 
-- **Streaming.** No shared `Sink` in 0.1, but nothing prevents one: parts are self-contained, carry their own warnings, and need not be numbered contiguously. One conflict must be settled before a sink is designed. Some inferred structure needs the whole document (PDF heading levels need the document-wide body font size; header/footer tagging compares pages), so a streaming extractor either offers only page-local inference or runs a statistics pass first. That decides whether a sink receives final parts or provisional ones. When it is added, it should come with a serialized form (one header line, one line per part, one trailer line) for the CLI and non-Go consumers.
+- **Streaming.** No shared `Sink` in module v0.1.0 or schema 0.2, but nothing prevents one: parts are self-contained, carry their own warnings, and need not be numbered contiguously. One conflict must be settled before a sink is designed. Some inferred structure needs the whole document (PDF heading levels need the document-wide body font size; header/footer tagging compares pages), so a streaming extractor either offers only page-local inference or runs a statistics pass first. That decides whether a sink receives final parts or provisional ones. When it is added, it should come with a serialized form (one header line, one line per part, one trailer line) for the CLI and non-Go consumers.
 - **Numeric confidence.** Only if measurements from the PDF layout work show that a score would be meaningful.
-- **Typed table cells.** Cells are strings. Typed values can be added alongside if a consumer needs them.

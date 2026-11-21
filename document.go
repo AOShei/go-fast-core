@@ -47,7 +47,7 @@
 //   - Lists that consumers iterate are never nil: Document.Parts,
 //     Part.Blocks and Table.Rows. JSON then has [] where a list is empty,
 //     never null, at no encoding cost. New and Part.Finish take care
-//     of the first two; a table has at least one row.
+//     of the first two; a table has at least one row and one column.
 //   - Output is deterministic: the same input and options give the same
 //     Document whatever Options.Workers is, including where a limit
 //     truncates it.
@@ -94,17 +94,34 @@ import (
 //
 // 0.2 (2026-11-20): Hidden became Display, with only the reasons a file
 // declares ("hidden", "no_ink"); hidden_checked and the text.hidden
-// warning were removed.
+// warning were removed. Later in 0.2, two rules narrowed what an
+// extractor may write without changing the shape: a thematic break is
+// always native (Validate rejects an inferred one), and the values of
+// Attrs["stored"], Attrs["type"] on a note and Attrs["role"] are closed
+// sets.
+//
+// The schema version is not the module version: module v0.1.0 writes
+// schema 0.2.
 const SchemaVersion = "0.2"
 
 // Document is the output of every go-fast-* extractor.
 type Document struct {
-	SchemaVersion string        `json:"schema_version"`
-	Source        Source        `json:"source"`
-	Metadata      Metadata      `json:"metadata,omitzero"`
-	Outline       []OutlineItem `json:"outline,omitempty"`
-	Parts         []Part        `json:"parts"`
-	Children      []*Document   `json:"children,omitempty"`
+	// SchemaVersion is the SchemaVersion of the package that wrote it.
+	SchemaVersion string `json:"schema_version"`
+	// Source says what the document was extracted from.
+	Source Source `json:"source"`
+	// Metadata holds the properties the source declares for the whole
+	// document.
+	Metadata Metadata `json:"metadata,omitzero"`
+	// Outline is the source's own table of contents, in its order.
+	Outline []OutlineItem `json:"outline,omitempty"`
+	// Parts are the format's natural units in source order: pages,
+	// slides, sheets, chapters, messages or one body, then the stored
+	// part if there is one. Never nil.
+	Parts []Part `json:"parts"`
+	// Children are the embedded documents, in the order the extractor met
+	// them; see Options.ExtractChild.
+	Children []*Document `json:"children,omitempty"`
 	// Warnings holds problems that concern the document as a whole.
 	// Problems local to a part are in Part.Warnings.
 	Warnings []Warning `json:"warnings,omitempty"`
@@ -141,8 +158,10 @@ type Metadata struct {
 	Subject string   `json:"subject,omitempty"`
 	// Keywords follows the same rule as Authors: a single free-text
 	// keywords field yields one entry, verbatim.
-	Keywords []string  `json:"keywords,omitempty"`
-	Language string    `json:"language,omitempty"` // BCP 47, e.g. "en", "pt-BR"
+	Keywords []string `json:"keywords,omitempty"`
+	Language string   `json:"language,omitempty"` // BCP 47, e.g. "en", "pt-BR"
+	// Created and Modified are the dates the source declares for the
+	// document; zero where it declares none.
 	Created  time.Time `json:"created,omitzero"`
 	Modified time.Time `json:"modified,omitzero"`
 	// Application is the software that produced the file.
@@ -176,6 +195,8 @@ type OutlineItem struct {
 // A part is self-contained: a worker can fill one without touching any
 // shared state, and a part handed on by itself carries its own warnings.
 type Part struct {
+	// Kind is the kind of unit: page, slide, sheet, chapter, message,
+	// body or stored.
 	Kind PartKind `json:"kind"`
 	// Number is the 1-based ordinal of this part in the source.
 	Number int `json:"number"`
@@ -191,8 +212,11 @@ type Part struct {
 	// Display gives the reasons the file declares for the whole part: a
 	// hidden sheet or slide. Every block of the part carries the same
 	// reasons (Finish copies them).
-	Display  Display   `json:"display,omitempty"`
-	Blocks   []Block   `json:"blocks"`
+	Display Display `json:"display,omitempty"`
+	// Blocks are the part's content in reading order. Never nil once
+	// Finish has been called.
+	Blocks []Block `json:"blocks"`
+	// Warnings are the problems local to this part.
 	Warnings []Warning `json:"warnings,omitempty"`
 }
 

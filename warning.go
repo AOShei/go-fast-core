@@ -9,8 +9,9 @@ package gofastcore
 type Warning struct {
 	// Code is a stable machine-readable identifier. The codes shared by
 	// all extractors are the Warn* constants; an extractor may add its own
-	// under a format prefix, e.g. "pdf.xref_rebuilt".
-	Code     string   `json:"code"`
+	// under a format prefix, e.g. "pdf.font_missing".
+	Code string `json:"code"`
+	// Severity says how the problem affects the output.
 	Severity Severity `json:"severity"`
 	// Message is free text for people. Programs should switch on Code.
 	Message string `json:"message,omitempty"`
@@ -90,7 +91,8 @@ const (
 
 	// WarnChildNotExtracted: an embedded document is listed in Children
 	// with its name and size but was not extracted, because no child
-	// extractor was supplied or the depth limit was reached.
+	// extractor was supplied, the depth limit was reached, or the
+	// extractor had nothing to hand over (a limit stopped it first).
 	WarnChildNotExtracted = "child.not_extracted"
 
 	// WarnChildUnsupported: no extractor handles the embedded document's
@@ -99,8 +101,9 @@ const (
 	WarnChildUnsupported = "child.unsupported"
 
 	// WarnChildEncrypted: the embedded document is encrypted and was not
-	// opened, because no password was supplied or the one supplied does
-	// not open it. Severity error.
+	// opened: no password was supplied, the one supplied does not open
+	// it, or no key in Options.Keys matches a recipient it names.
+	// Severity error.
 	WarnChildEncrypted = "child.encrypted"
 
 	// WarnChildFailed: extraction of an embedded document was attempted

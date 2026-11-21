@@ -20,6 +20,8 @@ const (
 	// KindUnknown is a kind this version of the package does not know.
 	// Consumers should treat it as a paragraph.
 	KindUnknown
+	// The kinds of content. What each uses of Block's fields is in the
+	// table in Block's documentation.
 	KindParagraph
 	KindHeading
 	KindListItem
@@ -35,7 +37,8 @@ const (
 	KindFooter
 	// KindThematicBreak is a break between topics or scenes that the
 	// source marks as such: an HTML <hr>, a Markdown thematic break,
-	// Word's horizontal line. It has no text and is always OriginNative:
+	// Word's horizontal line, an empty paragraph in LibreOffice's
+	// Horizontal Line paragraph style. It has no text and is always OriginNative:
 	// a bordered or ruled paragraph, a drawn line or a row of asterisks is
 	// formatting, not a declared break, and no break is inferred from it.
 	// Page, column and section breaks are layout and are not emitted as
@@ -106,8 +109,8 @@ const (
 	// docx, odt, html, txt, md, rtf.
 	PartBody
 	PartPage    // pdf
-	PartSlide   // pptx, odp, ppt
-	PartSheet   // xlsx, ods, xls, csv
+	PartSlide   // pptx, odp
+	PartSheet   // xlsx (and xlsb), ods
 	PartChapter // epub
 	PartMessage // eml, msg; one per message in an mbox
 	// PartStored holds what belongs to the file as a whole and to no
@@ -216,8 +219,8 @@ const (
 	SeverityInvalid Severity = 0
 	// SeverityInfo: something notable happened; the output is complete.
 	SeverityInfo Severity = 1
-	// SeverityWarning: the output is present but degraded or may not
-	// represent what a reader of the source would see.
+	// SeverityWarning: the output is present but incomplete or degraded,
+	// or it is one of more than one way the input can be read.
 	SeverityWarning Severity = 2
 	// SeverityError: content is missing or untrustworthy.
 	SeverityError Severity = 3

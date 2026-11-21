@@ -12,7 +12,10 @@ import (
 // Validate checks that the document obeys the model's structural contract
 // and the mechanical text conventions (valid UTF-8, no control characters,
 // no unexpanded ligatures in text, trimmed non-empty block text) and
-// returns every violation found, joined with errors.Join.
+// returns every violation found, joined with errors.Join. It also checks
+// that Part.Finish was called on every part, that the lists consumers
+// iterate are not nil, and that every Attrs["stored"], note Attrs["type"]
+// and Attrs["role"] is one of the package's values.
 //
 // It is a check on producers. It walks the whole document, so call it from
 // tests rather than on the hot path, and it rejects the Unknown enum

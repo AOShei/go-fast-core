@@ -60,11 +60,12 @@ var (
 )
 
 // Options are the settings common to all extractors. The zero value asks
-// for text and structure only, for the whole input, using all CPUs.
+// for text, structure and a block for every image, for the whole input,
+// using all CPUs.
 //
 // Settings that only one format understands (for PDF: memory mapping, a
 // cache budget) do not belong here. They are fields on that library's
-// extractor value, e.g. gofastpdf.Extractor{...}.Extract(...).
+// extractor value, e.g. (&gofastpdf.Extractor{...}).Extract(...).
 type Options struct {
 	// Workers bounds the goroutines used inside a single document
 	// (e.g. PDF pages). 0 means runtime.GOMAXPROCS(0). Pipelines that
@@ -152,8 +153,8 @@ const (
 // PartRange selects parts by number, both ends inclusive. A zero First
 // means from the first part; a zero Last means through the last.
 type PartRange struct {
-	First int
-	Last  int
+	First int // the first part number selected; 0 means from the first
+	Last  int // the last part number selected; 0 means through the last
 }
 
 // Contains reports whether part number n is inside the range.
@@ -240,7 +241,8 @@ func ResolveLimit(v, def int64) int64 {
 // The returned document has no parts and a single warning when the child
 // was not extracted. The warning code says why:
 //
-//	WarnChildNotExtracted  no ChildFunc was supplied, or the depth limit was reached
+//	WarnChildNotExtracted  no ChildFunc was supplied, the depth limit was reached, or r is nil
+//	                       (the extractor has nothing to hand over, as when a limit stopped it)
 //	WarnChildUnsupported   the ChildFunc returned ErrUnsupported
 //	WarnChildEncrypted     the ChildFunc returned ErrPasswordRequired, ErrWrongPassword or ErrKeyRequired
 //	WarnChildFailed        the ChildFunc returned any other error
