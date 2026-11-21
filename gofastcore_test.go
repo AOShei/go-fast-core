@@ -701,7 +701,7 @@ func TestSharedCodesAreDistinct(t *testing.T) {
 		WarnPartFailed, WarnPartNoText, WarnPartImageOnly, WarnTextUnmappedGlyphs, WarnTextTrackedChanges, WarnInputTrailingData,
 		WarnHeadingLevelClamped, WarnImageUnsupportedEncoding, WarnInputRepaired, WarnInputActiveContent,
 		WarnInputExternalReference, WarnInputAmbiguous, WarnLimitExceeded, WarnChildNotExtracted, WarnChildUnsupported,
-		WarnChildEncrypted, WarnChildFailed,
+		WarnChildEncrypted, WarnChildFailed, WarnWarningsOmitted,
 	}
 	seen := map[string]bool{}
 	for _, c := range codes {

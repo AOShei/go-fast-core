@@ -126,9 +126,6 @@ type Document struct {
 	// Warnings holds problems that concern the document as a whole.
 	// Problems local to a part are in Part.Warnings.
 	Warnings []Warning `json:"warnings,omitempty"`
-
-	// omitted counts the warnings Warn left out past MaxWarnings.
-	omitted int
 }
 
 // New returns an empty Document for the given format with the schema
@@ -222,16 +219,13 @@ type Part struct {
 	Blocks []Block `json:"blocks"`
 	// Warnings are the problems local to this part.
 	Warnings []Warning `json:"warnings,omitempty"`
-
-	// omitted counts the warnings Warn left out past MaxWarnings.
-	omitted int
 }
 
 // Warn appends a warning to the part. It keeps at most MaxWarnings of
 // them; past that it counts the rest in one last warnings.omitted
-// warning (see MaxWarnings).
+// warning (see MaxWarnings), so a call may add no entry.
 func (p *Part) Warn(severity Severity, code, message string) {
-	p.Warnings, p.omitted = addWarning(p.Warnings, p.omitted, "part", severity, code, message)
+	p.Warnings = addWarning(p.Warnings, "part", severity, code, message)
 }
 
 // Has reports whether the part carries a warning with the given code.
@@ -248,35 +242,70 @@ func (p *Part) Has(code string) bool {
 // them, as Part.Warn does. It is not safe for concurrent use; workers
 // should warn on their own Part instead.
 func (d *Document) Warn(severity Severity, code, message string) {
-	d.Warnings, d.omitted = addWarning(d.Warnings, d.omitted, "document", severity, code, message)
+	d.Warnings = addWarning(d.Warnings, "document", severity, code, message)
 }
 
 // MaxWarnings is the number of warnings Part.Warn and Document.Warn keep
 // on one part or one document. Past it, each further warning is counted
-// in a single last warning with the code warnings.omitted, whose severity
-// is the highest of those it counts and whose message gives their number.
-// A list of warnings therefore never has more than MaxWarnings+1 entries
-// when it is built with Warn. An extractor should still merge warnings
-// that repeat, with a count, rather than rely on this bound.
+// in a single warning with the code warnings.omitted, kept last, whose
+// severity is the highest of those it counts and whose message begins
+// with their number. The count is read back from that warning, so it
+// survives a copy of the part and a round trip through JSON. Code that
+// appends to Warnings directly is not bounded by this; when it appends
+// after the summary, the next Warn moves the summary back to the end.
+// Past the bound Warn adds no entry, so Has does not see the warnings it
+// only counted, and code that remembers the index of a warning it raises
+// must check it. Past the bound Warn also updates the summary in place,
+// so two copies of a part that share one Warnings array share it. An extractor should still merge warnings that repeat,
+// with a count, rather than rely on this bound.
 const MaxWarnings = 1000
 
-func addWarning(ws []Warning, omitted int, where string, severity Severity, code, message string) ([]Warning, int) {
-	if omitted == 0 && len(ws) < MaxWarnings {
-		return append(ws, Warning{Code: code, Severity: severity, Message: message}), 0
+func addWarning(ws []Warning, where string, severity Severity, code, message string) []Warning {
+	if len(ws) < MaxWarnings {
+		return append(ws, Warning{Code: code, Severity: severity, Message: message})
 	}
-	omitted++
-	if omitted == 1 || len(ws) == 0 || ws[len(ws)-1].Code != WarnWarningsOmitted {
-		ws = append(ws, Warning{Code: WarnWarningsOmitted, Severity: severity})
+	// Find the summary: last in the common case, elsewhere only when an
+	// extractor appended after it. It is moved to the end.
+	at := -1
+	for i := len(ws) - 1; i >= 0; i-- {
+		if ws[i].Code == WarnWarningsOmitted {
+			at = i
+			break
+		}
 	}
-	last := &ws[len(ws)-1]
-	if severity.Valid() && (!last.Severity.Valid() || severity > last.Severity) {
-		last.Severity = severity
+	sum := Warning{Code: WarnWarningsOmitted}
+	n := 0
+	if at >= 0 {
+		sum = ws[at]
+		n = omittedCount(sum.Message)
+		if at == len(ws)-1 {
+			ws = ws[:at]
+		} else { // rare: copy, rather than shift the caller's array
+			ws = append(ws[:at:at], ws[at+1:]...)
+		}
 	}
-	if !last.Severity.Valid() {
-		last.Severity = SeverityWarning
+	n++
+	if severity.Valid() && (!sum.Severity.Valid() || severity > sum.Severity) {
+		sum.Severity = severity
 	}
-	last.Message = strconv.Itoa(omitted) + " more warnings are not listed; at most " + strconv.Itoa(MaxWarnings) + " are kept per " + where
-	return ws, omitted
+	if !sum.Severity.Valid() {
+		sum.Severity = SeverityWarning
+	}
+	if n == 1 {
+		sum.Message = "1 more warning is not listed; at most " + strconv.Itoa(MaxWarnings) + " are kept per " + where
+	} else {
+		sum.Message = strconv.Itoa(n) + " more warnings are not listed; at most " + strconv.Itoa(MaxWarnings) + " are kept per " + where
+	}
+	return append(ws, sum)
+}
+
+// omittedCount reads the number a warnings.omitted message begins with.
+func omittedCount(msg string) int {
+	n := 0
+	for i := 0; i < len(msg) && msg[i] >= '0' && msg[i] <= '9' && n < 1<<40; i++ {
+		n = n*10 + int(msg[i]-'0')
+	}
+	return n
 }
 
 // AllBlocks iterates over every block of the document in reading order,
