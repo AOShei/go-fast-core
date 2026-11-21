@@ -80,8 +80,8 @@ func TestWarnCapAfterJSON(t *testing.T) {
 	}
 }
 
-// An extractor that appends after the summary: the next Warn moves the
-// summary back to the end and keeps its count and severity.
+// An extractor that appends after the summary: Warn finds the summary
+// where it is and counts on in it.
 func TestWarnCapAfterDirectAppend(t *testing.T) {
 	var p Part
 	fill(&p, MaxWarnings+2, SeverityError)
@@ -96,10 +96,11 @@ func TestWarnCapAfterDirectAppend(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("%d summaries, want 1", n)
 	}
-	if w := lastWarning(p.Warnings); w.Code != WarnWarningsOmitted || w.Severity != SeverityError || !strings.HasPrefix(w.Message, "3 more") {
-		t.Errorf("last warning %+v", w)
+	sum := p.Warnings[MaxWarnings]
+	if sum.Code != WarnWarningsOmitted || sum.Severity != SeverityError || !strings.HasPrefix(sum.Message, "3 more") {
+		t.Errorf("summary %+v", sum)
 	}
-	if w := p.Warnings[len(p.Warnings)-2]; w.Code != "x.direct" {
+	if w := lastWarning(p.Warnings); w.Code != "x.direct" {
 		t.Errorf("the direct warning moved: %+v", w)
 	}
 	// A list filled past the bound by direct appends alone gets a summary.
@@ -160,5 +161,43 @@ func BenchmarkWarnPastCap(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		p.Warn(SeverityInfo, "x.over", "over")
+	}
+}
+
+// A summary merged in from a part, before the document's own bound, is
+// not the document's.
+func TestWarnCapForeignSummary(t *testing.T) {
+	d := New("txt")
+	d.Warnings = append(d.Warnings, Warning{Code: WarnWarningsOmitted, Severity: SeverityError, Message: "500 more warnings are not listed; at most 1000 are kept per part"})
+	for i := 0; i < MaxWarnings; i++ {
+		d.Warn(SeverityInfo, "x.many", "many")
+	}
+	if len(d.Warnings) != MaxWarnings+1 {
+		t.Fatalf("%d warnings", len(d.Warnings))
+	}
+	if w := lastWarning(d.Warnings); w.Code != WarnWarningsOmitted || w.Severity != SeverityInfo || !strings.HasPrefix(w.Message, "1 more warning ") {
+		t.Errorf("document summary %+v", w)
+	}
+}
+
+// Direct appends and Warn alternating past the bound stay cheap: no copy
+// of the list per call.
+func TestWarnCapAlternating(t *testing.T) {
+	var p Part
+	fill(&p, MaxWarnings+1, SeverityInfo)
+	allocs := testing.AllocsPerRun(1000, func() {
+		p.Warnings = append(p.Warnings, Warning{Code: "x.direct", Severity: SeverityInfo})
+		p.Warn(SeverityInfo, "x.over", "over")
+	})
+	if allocs > 4 {
+		t.Errorf("%.1f allocations per round", allocs)
+	}
+}
+
+func TestOmittedCount(t *testing.T) {
+	for msg, want := range map[string]int{"": 0, "7 more": 7, "123456789012345 more": 1000000000, "x": 0} {
+		if got := omittedCount(msg); (want < 1000000000 && got != want) || got < 0 {
+			t.Errorf("omittedCount(%q) = %d", msg, got)
+		}
 	}
 }
