@@ -84,6 +84,7 @@ package gofastcore
 
 import (
 	"iter"
+	"strconv"
 	"time"
 )
 
@@ -125,6 +126,9 @@ type Document struct {
 	// Warnings holds problems that concern the document as a whole.
 	// Problems local to a part are in Part.Warnings.
 	Warnings []Warning `json:"warnings,omitempty"`
+
+	// omitted counts the warnings Warn left out past MaxWarnings.
+	omitted int
 }
 
 // New returns an empty Document for the given format with the schema
@@ -218,11 +222,16 @@ type Part struct {
 	Blocks []Block `json:"blocks"`
 	// Warnings are the problems local to this part.
 	Warnings []Warning `json:"warnings,omitempty"`
+
+	// omitted counts the warnings Warn left out past MaxWarnings.
+	omitted int
 }
 
-// Warn appends a warning to the part.
+// Warn appends a warning to the part. It keeps at most MaxWarnings of
+// them; past that it counts the rest in one last warnings.omitted
+// warning (see MaxWarnings).
 func (p *Part) Warn(severity Severity, code, message string) {
-	p.Warnings = append(p.Warnings, Warning{Code: code, Severity: severity, Message: message})
+	p.Warnings, p.omitted = addWarning(p.Warnings, p.omitted, "part", severity, code, message)
 }
 
 // Has reports whether the part carries a warning with the given code.
@@ -235,10 +244,39 @@ func (p *Part) Has(code string) bool {
 	return false
 }
 
-// Warn appends a document-level warning. It is not safe for concurrent
-// use; workers should warn on their own Part instead.
+// Warn appends a document-level warning. It keeps at most MaxWarnings of
+// them, as Part.Warn does. It is not safe for concurrent use; workers
+// should warn on their own Part instead.
 func (d *Document) Warn(severity Severity, code, message string) {
-	d.Warnings = append(d.Warnings, Warning{Code: code, Severity: severity, Message: message})
+	d.Warnings, d.omitted = addWarning(d.Warnings, d.omitted, "document", severity, code, message)
+}
+
+// MaxWarnings is the number of warnings Part.Warn and Document.Warn keep
+// on one part or one document. Past it, each further warning is counted
+// in a single last warning with the code warnings.omitted, whose severity
+// is the highest of those it counts and whose message gives their number.
+// A list of warnings therefore never has more than MaxWarnings+1 entries
+// when it is built with Warn. An extractor should still merge warnings
+// that repeat, with a count, rather than rely on this bound.
+const MaxWarnings = 1000
+
+func addWarning(ws []Warning, omitted int, where string, severity Severity, code, message string) ([]Warning, int) {
+	if omitted == 0 && len(ws) < MaxWarnings {
+		return append(ws, Warning{Code: code, Severity: severity, Message: message}), 0
+	}
+	omitted++
+	if omitted == 1 || len(ws) == 0 || ws[len(ws)-1].Code != WarnWarningsOmitted {
+		ws = append(ws, Warning{Code: WarnWarningsOmitted, Severity: severity})
+	}
+	last := &ws[len(ws)-1]
+	if severity.Valid() && (!last.Severity.Valid() || severity > last.Severity) {
+		last.Severity = severity
+	}
+	if !last.Severity.Valid() {
+		last.Severity = SeverityWarning
+	}
+	last.Message = strconv.Itoa(omitted) + " more warnings are not listed; at most " + strconv.Itoa(MaxWarnings) + " are kept per " + where
+	return ws, omitted
 }
 
 // AllBlocks iterates over every block of the document in reading order,
