@@ -8,7 +8,7 @@ Every extractor (`go-fast-pdf`, `go-fast-ooxml`, `go-fast-odf`, `go-fast-html`, 
 import "github.com/AOShei/go-fast-core" // package gofastcore
 ```
 
-**Status: module v0.1.0, schema version 0.2.** The module version is the Go module's tag; the schema version is the `schema_version` in every document and changes only as [Schema evolution](#schema-evolution) says. Schema 0.1 was agreed with the PDF extractor over two review rounds on 2026-11-18. Schema 0.2 (2026-11-20) replaced the hidden-text verdicts with what a file declares about display; see [What the file declares](#what-the-file-declares). Changes are in [CHANGELOG.md](CHANGELOG.md).
+**Status: module v0.1.1, schema version 0.2.** The module version is the Go module's tag; the schema version is the `schema_version` in every document and changes only as [Schema evolution](#schema-evolution) says. Schema 0.1 was agreed with the PDF extractor over two review rounds on 2026-11-18. Schema 0.2 (2026-11-20) replaced the hidden-text verdicts with what a file declares about display; see [What the file declares](#what-the-file-declares). Changes are in [CHANGELOG.md](CHANGELOG.md).
 
 ## Series conventions
 
@@ -17,7 +17,7 @@ import "github.com/AOShei/go-fast-core" // package gofastcore
 - **Format-specific settings.** `Options` holds only what every format understands. Settings for one format (for PDF: memory mapping, a cache budget) are fields on that library's extractor value: `(&gofastpdf.Extractor{...}).Extract(...)`.
 - **Dependencies.** `go-fast-core` imports only the standard library. A library's package imports only the standard library and `go-fast-core`, never another extractor; its command may import other go-fast extractors to hand on embedded documents (see [Embedded documents](#embedded-documents)). Any other dependency must be challenged.
 - **Pinned versions.** A library requires `go-fast-core`, and a command other go-fast modules, at a tag or at the pseudo-version of a pushed commit. No `replace` directive or `go.work` file is committed.
-- **Bounded input.** Every input is read within `Options.Limits`: what a file decides (its size, how much it decompresses to, how much text it becomes, how many parts and how deep its embedded documents go) is bounded. Reaching a bound truncates the document with a `limit.exceeded` warning, or is `ErrLimitExceeded` when there is no document yet.
+- **Bounded input.** Every input is read within `Options.Limits`: what a file decides (its size, how much it decompresses to, how much text it becomes, how many parts and how deep its embedded documents go) is bounded. Reaching a bound truncates the document with a `limit.exceeded` warning, or is `ErrLimitExceeded` when there is no document yet. The same holds for the fixed bounds a library keeps of its own (the longest field instruction it reads, the most columns of a table): what they cut or leave out is reported with `limit.exceeded`, never dropped silently. Warnings are bounded too: see [Warnings](#warnings).
 - **Nothing fetched or run.** The libraries never run what a file contains (macros, scripts, actions) and never fetch or send anything a file refers to. They report that it is there (`input.active_content`, `input.external_reference`).
 - **Layering.** The shared model is the common denominator across formats. An extractor may offer a richer native API beside it (for PDF: word and line boxes, font names and sizes, glyph positions). Those details stay out of core.
 - **Preserve content.** Anything that is real content, whether it carries meaning or provides context, is preserved where possible. Normalizing a representation is fine (a ligature to its letters, `\r\n` to `\n`); dropping or flattening something the author put there is not. This is why tabs are kept in text, running headers and footers are tagged instead of removed, and an attachment that cannot be extracted is still listed.
@@ -169,6 +169,8 @@ A warning is a fact about what happened. It never recommends an action.
 
 Warnings local to a part are in `Part.Warnings`; those about the whole file are in `Document.Warnings`. `doc.AllWarnings()` iterates both, and `part.Has(code)` tests one part.
 
+A warning that can be raised many times in one part (once per code page, per charset label, per chapter) is raised once, with a count. As a bound for the rest, `Part.Warn` and `Document.Warn` keep at most `MaxWarnings` (1000) warnings on a part or a document; past it they count the rest in one last `warnings.omitted` warning, whose severity is the highest of those it counts.
+
 | Severity | Meaning |
 |---|---|
 | `info` | Something notable happened; the output is complete |
@@ -191,7 +193,8 @@ Shared codes (constants `Warn*`):
 | `input.active_content` | The input contains something meant to be run, or an instruction to run something: macros, scripts, an action that starts a program or opens a file. It is not read and never run |
 | `input.external_reference` | The input refers to a file or address outside itself other than by an ordinary hyperlink: a remote template, a linked picture, an action that sends or loads data. Nothing is fetched or sent |
 | `input.ambiguous` | The input can be read as two different documents depending on the program, such as an archive that names a member twice in two ways |
-| `limit.exceeded` | A limit was reached during extraction; the output is truncated there |
+| `limit.exceeded` | A limit was reached during extraction, one of `Options.Limits` or a fixed bound of the extractor; the output is cut or left out there, and the message says what |
+| `warnings.omitted` | More than `MaxWarnings` warnings were raised on the part or document; the rest are counted here, and the message begins with their number. Added by `Warn` at the end of the list; warnings an extractor appends to the list directly can follow it |
 | `child.not_extracted` | An embedded document is listed but was not extracted |
 | `child.unsupported` | No extractor handles the embedded document's format, or it uses an unimplemented feature |
 | `child.encrypted` | The embedded document is encrypted and was not opened (no password, the wrong one, or no key for the certificate it is encrypted for) |

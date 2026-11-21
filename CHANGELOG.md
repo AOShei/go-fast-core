@@ -2,6 +2,12 @@
 
 The module version is the Go module's tag. The schema version is the `schema_version` every document carries; it changes only when a field is removed or its meaning changes (README, "Schema evolution").
 
+## v0.1.1 (schema 0.2)
+
+- **Warnings are bounded.** `Part.Warn` and `Document.Warn` keep at most `MaxWarnings` (1000) warnings on a part or a document. Past that, each further warning is counted in one last warning, `warnings.omitted` (`WarnWarningsOmitted`). Its severity is the highest of those it counts, and its message begins with their number. The count is read back from that warning, so it survives copies of a part and a round trip through JSON. It is added last; an extractor that appends to `Warnings` directly may put entries after it, and such appends are not bounded. The count stops at 999,999,999. Past the bound `Warn` adds no entry, so `Has` does not see a warning that was only counted. Before this, a file that raised a warning per code page or per charset label could give hundreds of thousands of them, and JSON many times its own size.
+- **`limit.exceeded` covers a library's fixed bounds.** The code was defined for `Options.Limits`; it now also reports what a library's own fixed bounds cut or leave out, with the message saying which bound. The README's "Bounded input" convention says so.
+- The schema stays 0.2. Parts and documents with fewer than 1000 warnings are as before.
+
 ## v0.1.0 (schema 0.2)
 
 The first release: the shared document model and extractor interface used by go-fast-pdf, go-fast-ooxml, go-fast-odf, go-fast-html, go-fast-rtf and go-fast-email.

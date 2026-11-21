@@ -84,6 +84,8 @@ package gofastcore
 
 import (
 	"iter"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -220,9 +222,11 @@ type Part struct {
 	Warnings []Warning `json:"warnings,omitempty"`
 }
 
-// Warn appends a warning to the part.
+// Warn appends a warning to the part. It keeps at most MaxWarnings of
+// them; past that it counts the rest in one last warnings.omitted
+// warning (see MaxWarnings), so a call may add no entry.
 func (p *Part) Warn(severity Severity, code, message string) {
-	p.Warnings = append(p.Warnings, Warning{Code: code, Severity: severity, Message: message})
+	p.Warnings = addWarning(p.Warnings, "part", severity, code, message)
 }
 
 // Has reports whether the part carries a warning with the given code.
@@ -235,10 +239,99 @@ func (p *Part) Has(code string) bool {
 	return false
 }
 
-// Warn appends a document-level warning. It is not safe for concurrent
-// use; workers should warn on their own Part instead.
+// Warn appends a document-level warning. It keeps at most MaxWarnings of
+// them, as Part.Warn does. It is not safe for concurrent use; workers
+// should warn on their own Part instead.
 func (d *Document) Warn(severity Severity, code, message string) {
-	d.Warnings = append(d.Warnings, Warning{Code: code, Severity: severity, Message: message})
+	d.Warnings = addWarning(d.Warnings, "document", severity, code, message)
+}
+
+// MaxWarnings is the number of warnings Part.Warn and Document.Warn keep
+// on one part or one document. Past it, each further warning is counted
+// in a single warning with the code warnings.omitted, added at the end of
+// the list, whose severity is the highest of those it counts and whose
+// message begins with their number. The count is read back from that
+// warning, so it survives a copy of the part and a round trip through
+// JSON. It stays last unless an extractor appends to Warnings directly
+// after it; such appends are not bounded by MaxWarnings, and an extractor
+// that makes many of them past the bound may get a second summary. The
+// count stops at 999,999,999. Past the bound
+// Warn adds no entry and updates the summary in place: Has does not see
+// a warning that was only counted, code that remembers the index of a
+// warning it raises must check it, and two copies of a part that share
+// one Warnings array share the summary, or overwrite each other's. A
+// summary copied in from another part's list counts on for this one. An extractor should still merge
+// warnings that repeat, with a count, rather than rely on this bound.
+const MaxWarnings = 1000
+
+func addWarning(ws []Warning, where string, severity Severity, code, message string) []Warning {
+	if len(ws) < MaxWarnings {
+		return append(ws, Warning{Code: code, Severity: severity, Message: message})
+	}
+	// Warn adds the summary at index MaxWarnings, unless direct appends
+	// had already taken the list past it; then it is near the end. Only
+	// those places are looked at, so a call costs the same however many
+	// warnings were appended directly, and only a summary written for
+	// this list ("... kept per part" or "... per document") is taken: a
+	// part's summary merged into a document's list is not the document's.
+	// An extractor that appends many warnings directly past the bound may
+	// so get more than one summary.
+	at := -1
+	if len(ws) > MaxWarnings && isSummary(ws[MaxWarnings], where) {
+		at = MaxWarnings
+	} else {
+		for i := len(ws) - 1; i > MaxWarnings && i >= len(ws)-summaryReach; i-- {
+			if isSummary(ws[i], where) {
+				at = i
+				break
+			}
+		}
+	}
+	if at < 0 {
+		ws = append(ws, Warning{Code: WarnWarningsOmitted})
+		at = len(ws) - 1
+	}
+	sum := &ws[at]
+	n := omittedCount(sum.Message)
+	if n < maxOmitted {
+		n++
+	}
+	if severity.Valid() && (!sum.Severity.Valid() || severity > sum.Severity) {
+		sum.Severity = severity
+	}
+	if !sum.Severity.Valid() {
+		sum.Severity = SeverityWarning
+	}
+	if n == 1 {
+		sum.Message = "1 more warning is not listed; at most " + strconv.Itoa(MaxWarnings) + " are kept per " + where
+	} else {
+		sum.Message = strconv.Itoa(n) + " more warnings are not listed; at most " + strconv.Itoa(MaxWarnings) + " are kept per " + where
+	}
+	return ws
+}
+
+// summaryReach is how far back from the end of a list Warn looks for the
+// summary when it is not at index MaxWarnings.
+const summaryReach = 64
+
+// maxOmitted is where the count stops: it fits an int on every platform.
+const maxOmitted = 999_999_999
+
+func isSummary(w Warning, where string) bool {
+	return w.Code == WarnWarningsOmitted && strings.HasSuffix(w.Message, " are kept per "+where)
+}
+
+// omittedCount reads the number a warnings.omitted message begins with,
+// up to maxOmitted.
+func omittedCount(msg string) int {
+	n := 0
+	for i := 0; i < len(msg) && msg[i] >= '0' && msg[i] <= '9'; i++ {
+		if n > maxOmitted/10 {
+			return maxOmitted
+		}
+		n = n*10 + int(msg[i]-'0')
+	}
+	return min(n, maxOmitted)
 }
 
 // AllBlocks iterates over every block of the document in reading order,

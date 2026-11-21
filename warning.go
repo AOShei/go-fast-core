@@ -84,10 +84,21 @@ const (
 	// follow the end.
 	WarnInputTrailingData = "input.trailing_data"
 
-	// WarnLimitExceeded: a limit from Options.Limits was reached during
-	// extraction and the output is truncated at that point. Severity
-	// error.
+	// WarnLimitExceeded: a limit was reached during extraction and the
+	// output is cut or left out at that point. The limit is one of
+	// Options.Limits or a fixed bound of the extractor (the longest field
+	// instruction it keeps, the most columns of a table it reads); the
+	// message says which, and what was left out. Severity error.
 	WarnLimitExceeded = "limit.exceeded"
+
+	// WarnWarningsOmitted: more warnings were raised on the part or the
+	// document than MaxWarnings, and the rest are counted here instead of
+	// listed. Part.Warn and Document.Warn add it at the end of the list
+	// (warnings appended to the list directly can follow it); extractors
+	// do not emit it themselves. Its message begins with the
+	// number of warnings it counts, and its severity is the highest of
+	// theirs.
+	WarnWarningsOmitted = "warnings.omitted"
 
 	// WarnChildNotExtracted: an embedded document is listed in Children
 	// with its name and size but was not extracted, because no child
