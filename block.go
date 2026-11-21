@@ -31,7 +31,8 @@ import "slices"
 // consumers can drop them.
 //
 // KindThematicBreak marks a break between topics or scenes that the
-// source declares (an HTML <hr>, a Markdown thematic break). It is a
+// source declares (an HTML <hr>, a Markdown thematic break, Word's
+// horizontal line, LibreOffice's Horizontal Line paragraph style). It is a
 // boundary a chunker can split on. It has no text and is never Continued.
 type Block struct {
 	// Kind is what the block is; it decides which other fields mean

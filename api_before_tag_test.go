@@ -168,3 +168,23 @@ func TestDecodeBudgetSettle(t *testing.T) {
 		t.Fatal("nil budget settled false")
 	}
 }
+
+// Take never gives back: a negative n is taken as 0, and Take(0) only
+// reports whether the budget is spent.
+func TestTextBudgetTakeNegative(t *testing.T) {
+	_, b := WithTextBudget(context.Background(), Limits{MaxTextBytes: 100})
+	if !b.Take(40) || !b.Take(-30) || b.Left() != 60 {
+		t.Fatalf("left %d, want 60", b.Left())
+	}
+	if !b.Take(0) || b.Left() != 60 {
+		t.Fatalf("Take(0) on a budget with 60 left: left %d", b.Left())
+	}
+	b.Take(61)
+	if b.Take(-1000) || b.Take(0) || !b.Spent() || b.Left() != -1 {
+		t.Fatalf("spent budget: left %d", b.Left())
+	}
+	var nilb *TextBudget
+	if !nilb.Take(-1) || !nilb.Take(0) {
+		t.Fatal("nil budget refused")
+	}
+}
