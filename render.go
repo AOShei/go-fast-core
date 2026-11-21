@@ -39,7 +39,9 @@ type RenderOptions struct {
 	// "<!-- child 2: report.pdf -->" in Markdown, "[child 2: report.pdf]"
 	// in plain text. A nested child is numbered by its path ("child 2.1").
 	// A child that was listed but not extracted gives its line only. The
-	// same options apply to every child.
+	// same options apply to every child. Children nested more than 64
+	// deep are not rendered: no extractor nests them so deep, and the
+	// bound stops a tree built by hand with a cycle in it.
 	Children bool
 }
 
@@ -77,10 +79,14 @@ func (d *Document) WriteText(w io.Writer, opts *RenderOptions) error {
 	return d.render(w, opts, false)
 }
 
-// Markdown renders a single part as Markdown with default options.
+// Markdown renders a single part as Markdown with default options. Those
+// leave out stored data and running headers and footers, so a stored part
+// renders as "". To render one with other options, render a Document
+// holding it.
 func (p *Part) Markdown() string { return p.render(true) }
 
-// Text renders a single part as plain text with default options.
+// Text renders a single part as plain text with default options, as
+// Markdown does.
 func (p *Part) Text() string { return p.render(false) }
 
 func (d *Document) render(w io.Writer, opts *RenderOptions, md bool) error {

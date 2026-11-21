@@ -69,7 +69,8 @@ func TextBudgetFrom(ctx context.Context) *TextBudget {
 
 // Take takes n bytes of text from the budget and reports whether they
 // were there to take. Once it has reported false the budget is spent:
-// the extractor keeps what it had before the call and stops.
+// the extractor keeps what it had before the call and stops. n is not
+// negative; Return gives bytes back.
 func (b *TextBudget) Take(n int) bool {
 	return b == nil || b.left.Add(-int64(n)) >= 0
 }

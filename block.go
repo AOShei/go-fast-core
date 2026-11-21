@@ -16,8 +16,8 @@ import "slices"
 //	KindQuote        quoted text          nesting, from 1 -
 //	KindCaption      caption text         -               -
 //	KindFootnote     note text            -               Marker
-//	KindFormula      LaTeX or plain text  -               -
-//	KindNote         note, comment, list  -               Attrs: type, author, date
+//	KindFormula      the formula          -               Attrs["notation"]
+//	KindNote         the note's text      -               Attrs: type, author, date, field
 //	KindHeader       running header       -               -
 //	KindFooter       running footer       -               -
 //	KindThematicBreak empty               -               -
@@ -34,9 +34,16 @@ import "slices"
 // source declares (an HTML <hr>, a Markdown thematic break). It is a
 // boundary a chunker can split on. It has no text and is never Continued.
 type Block struct {
-	Kind  Kind   `json:"kind"`
-	Level uint8  `json:"level,omitempty"`
-	Text  string `json:"text,omitempty"`
+	// Kind is what the block is; it decides which other fields mean
+	// something (the table above).
+	Kind Kind `json:"kind"`
+	// Level is a heading's level, or the nesting depth of a list item or
+	// quote; other kinds do not use it.
+	Level uint8 `json:"level,omitempty"`
+	// Text is the block's text, following the package's text conventions.
+	// It is empty only for a table or a thematic break, and for an image
+	// with no alternative text.
+	Text string `json:"text,omitempty"`
 
 	// Origin says whether the block's kind, level and boundaries are
 	// declared by the source or were inferred by the extractor. It does
@@ -81,6 +88,8 @@ type Block struct {
 	// Display set are always produced.
 	Spans []Span `json:"spans,omitempty"`
 
+	// Table is set exactly on a table block, Image exactly on an image
+	// block.
 	Table *Table `json:"table,omitempty"`
 	Image *Image `json:"image,omitempty"`
 
@@ -164,14 +173,24 @@ var roleNames = []string{RoleChart, RolePivot, RoleHeaders, RoleSignature}
 
 // Values of Attrs[AttrStored].
 const (
-	StoredPivotCache       = "pivot_cache"
-	StoredDefinedName      = "defined_name"
+	// StoredPivotCache: the records a pivot table was built from, kept in
+	// the file where the source data is gone.
+	StoredPivotCache = "pivot_cache"
+	// StoredDefinedName: a name a workbook defines for a value, a formula
+	// or a range of cells.
+	StoredDefinedName = "defined_name"
+	// StoredDocumentVariable: a variable a document stores for fields and
+	// macros to use (Word's document variables).
 	StoredDocumentVariable = "document_variable"
-	StoredCustomXML        = "custom_xml"
+	// StoredCustomXML: data a program stored in the file as XML of its
+	// own.
+	StoredCustomXML = "custom_xml"
 	// StoredFieldCode: the instruction of a field (a NoteField note, an
 	// RTF index or table-of-contents entry). Every field note carries it.
 	StoredFieldCode = "field_code"
-	StoredMacro     = "macro"
+	// StoredMacro: the source code of a macro or script, read as text and
+	// never run.
+	StoredMacro = "macro"
 	// StoredMarkupComment: a comment in the file's markup (an HTML or XML
 	// <!-- --> comment), which no reader displays. It stays where it
 	// stands. A reviewer's comment, which is displayed, is a NoteComment
@@ -283,7 +302,7 @@ type Location struct {
 	// e.g. "B2:F40".
 	Range string `json:"range,omitempty"`
 	// Offset and Length give the block's byte span in the source for
-	// plain-text formats (txt, md, csv, html).
+	// plain-text formats (txt, md, html).
 	Offset int64 `json:"offset,omitempty"`
 	Length int64 `json:"length,omitempty"`
 	// Anchor is an identifier the source itself gives the block, stable

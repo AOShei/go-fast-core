@@ -20,6 +20,8 @@ const (
 	// KindUnknown is a kind this version of the package does not know.
 	// Consumers should treat it as a paragraph.
 	KindUnknown
+	// The kinds of content. What each uses of Block's fields is in the
+	// table in Block's documentation.
 	KindParagraph
 	KindHeading
 	KindListItem
@@ -106,8 +108,8 @@ const (
 	// docx, odt, html, txt, md, rtf.
 	PartBody
 	PartPage    // pdf
-	PartSlide   // pptx, odp, ppt
-	PartSheet   // xlsx, ods, xls, csv
+	PartSlide   // pptx, odp
+	PartSheet   // xlsx (and xlsb), ods
 	PartChapter // epub
 	PartMessage // eml, msg; one per message in an mbox
 	// PartStored holds what belongs to the file as a whole and to no
@@ -216,8 +218,8 @@ const (
 	SeverityInvalid Severity = 0
 	// SeverityInfo: something notable happened; the output is complete.
 	SeverityInfo Severity = 1
-	// SeverityWarning: the output is present but degraded or may not
-	// represent what a reader of the source would see.
+	// SeverityWarning: the output is present but incomplete or degraded,
+	// or it is one of more than one way the input can be read.
 	SeverityWarning Severity = 2
 	// SeverityError: content is missing or untrustworthy.
 	SeverityError Severity = 3
