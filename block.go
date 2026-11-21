@@ -1,5 +1,7 @@
 package gofastcore
 
+import "slices"
+
 // Block is one unit of content in reading order.
 //
 // Which fields are meaningful depends on Kind:
@@ -110,8 +112,10 @@ const (
 	// AttrName is the name the source gives a table, a pivot table or a
 	// chart ("SalesTable").
 	AttrName = "name"
-	// AttrRole says what a table block stands for when it is not a grid
-	// of cells the source shows as such: one of the Role* values.
+	// AttrRole says what a block stands for when its kind alone does not
+	// say: a table that is not a grid of cells the source shows as such,
+	// the headers of a message, a block of a signature. One of the Role*
+	// values.
 	AttrRole = "role"
 	// AttrChart is the type of a chart, lowercase as the source names it
 	// ("bar", "line", "pie", "scatter").
@@ -135,6 +139,12 @@ const (
 	AttrField = "field"
 )
 
+// The values of Attrs[AttrStored], Attrs[AttrNoteType] and Attrs[AttrRole]
+// are closed sets: the Stored*, Note* and Role* constants below. A library
+// writes no other value, and Validate rejects one. A value a library needs
+// is added here, by a change to this package; a fact that only one format
+// has goes under a key of that library's own instead.
+
 // Values of Attrs[AttrRole].
 const (
 	// RoleChart: the table is the data of a chart, as the chart's source
@@ -142,7 +152,15 @@ const (
 	RoleChart = "chart"
 	// RolePivot: the table is a pivot table.
 	RolePivot = "pivot"
+	// RoleHeaders: the block is the headers of a message that a mail
+	// program shows (From, To, Date, Subject).
+	RoleHeaders = "headers"
+	// RoleSignature: the block is part of a message's signature, the text
+	// after a line "-- ".
+	RoleSignature = "signature"
 )
+
+var roleNames = []string{RoleChart, RolePivot, RoleHeaders, RoleSignature}
 
 // Values of Attrs[AttrStored].
 const (
@@ -166,14 +184,31 @@ const (
 	// an RTF document's closing brace, after a PDF's last %%EOF, appended
 	// to a zip archive). The part also carries WarnInputTrailingData.
 	StoredAfterEnd = "after_end"
+	// StoredManifestItem: a resource a publication lists in its manifest
+	// and no chapter shows, such as an EPUB's image that no page uses.
+	StoredManifestItem = "manifest_item"
+	// StoredStylesheet: the text of a style sheet (an HTML <style>
+	// element).
+	StoredStylesheet = "stylesheet"
+	// StoredGenerator: the name of the program that wrote the file, where
+	// the file records it as data (RTF \generator).
+	StoredGenerator = "generator"
+	// StoredCustomProperty: a property of the document that its author or
+	// a program defined, with its name in Attrs[AttrName] (RTF
+	// \userprops).
+	StoredCustomProperty = "custom_property"
 )
 
-// StoredKindNames lists every value of Attrs[AttrStored], for a command
-// that takes kinds by name (RenderOptions.StoredKinds). Do not modify it.
-var StoredKindNames = []string{
+var storedKindNames = []string{
 	StoredPivotCache, StoredDefinedName, StoredDocumentVariable, StoredCustomXML,
 	StoredFieldCode, StoredMacro, StoredMarkupComment, StoredFormField, StoredAfterEnd,
+	StoredManifestItem, StoredStylesheet, StoredGenerator, StoredCustomProperty,
 }
+
+// StoredKindNames returns every value of Attrs[AttrStored], for a command
+// that takes kinds by name (RenderOptions.StoredKinds). The slice is the
+// caller's.
+func StoredKindNames() []string { return slices.Clone(storedKindNames) }
 
 // Values of Attrs[AttrNotation].
 const (
@@ -213,7 +248,27 @@ const (
 	// the source names it. The values are shown to a reader who opens the
 	// list; the note sets no Display reason.
 	NoteChoices = "choices"
+	// NoteAttribute is text a markup element keeps in an attribute rather
+	// than in its content, and which a reader meets only through assistive
+	// technology or by pointing at it: aria-label, title, placeholder, an
+	// image map area's alt. It stands at the element's place, with the
+	// attribute's name in Attrs["attribute"]. No Display reason.
+	NoteAttribute = "attribute"
+	// NoteHeaders: the headers of a message that a mail program does not
+	// show, one "Name: value" per line. No Display reason: the format
+	// declares none.
+	NoteHeaders = "headers"
+	// NoteMIMEPreamble and NoteMIMEEpilogue: the text of a multipart
+	// message body before its first part and after its last, which no mail
+	// program shows. No Display reason: the format declares none.
+	NoteMIMEPreamble = "mime_preamble"
+	NoteMIMEEpilogue = "mime_epilogue"
 )
+
+var noteTypeNames = []string{
+	NoteComment, NoteDeletion, NoteSpeaker, NoteField, NoteChoices,
+	NoteAttribute, NoteHeaders, NoteMIMEPreamble, NoteMIMEEpilogue,
+}
 
 // Location pins a block to its place in the source so that a retrieval hit
 // can be cited and shown in context. Every field is optional; the part a
