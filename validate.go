@@ -3,6 +3,7 @@ package gofastcore
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -214,6 +215,15 @@ func (v *validator) block(b *Block, bp string) {
 	}
 	v.words(bp+".marker", b.Marker)
 	v.textMap(bp+".attrs", b.Attrs)
+	if s, ok := b.Attrs[AttrStored]; ok && !slices.Contains(storedKindNames, s) {
+		v.bad("%s: unknown stored kind %q", bp, s)
+	}
+	if s, ok := b.Attrs[AttrRole]; ok && !slices.Contains(roleNames, s) {
+		v.bad("%s: unknown role %q", bp, s)
+	}
+	if s, ok := b.Attrs[AttrNoteType]; ok && b.Kind == KindNote && !slices.Contains(noteTypeNames, s) {
+		v.bad("%s: unknown note type %q", bp, s)
+	}
 	if !b.Display.Valid() {
 		v.bad("%s: invalid display reasons %#x", bp, uint16(b.Display))
 	}

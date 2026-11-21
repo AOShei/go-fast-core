@@ -86,6 +86,23 @@ func (b *TextBudget) Left() int64 {
 // Spent reports whether Take has reported false.
 func (b *TextBudget) Spent() bool { return b != nil && b.left.Load() < 0 }
 
+// Exhaust spends what is left, so that Spent reports true and every later
+// Take reports false: for an extractor that has stopped at the limit by a
+// count of its own (an outline already cut at the limit) and so has
+// nothing left for what follows. It gives nothing back if more was taken
+// than there was.
+func (b *TextBudget) Exhaust() {
+	if b == nil {
+		return
+	}
+	for {
+		l := b.left.Load()
+		if l < 0 || b.left.CompareAndSwap(l, -1) {
+			return
+		}
+	}
+}
+
 // Return gives back n bytes that were taken, for an extractor that reads
 // a part again and will take them a second time.
 func (b *TextBudget) Return(n int64) {

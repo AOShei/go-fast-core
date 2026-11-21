@@ -24,7 +24,7 @@ import "context"
 //
 // How an extractor counts while it reads is its own affair: it may take
 // from the budget as it goes, or keep a count of its own and settle with
-// the budget before each embedded document and at the end.
+// the budget (Settle) before each embedded document and at the end.
 //
 // A nil *DecodeBudget has no limit. A DecodeBudget is safe for
 // concurrent use.
@@ -60,6 +60,27 @@ func DecodeBudgetFrom(ctx context.Context) *DecodeBudget {
 // they were there to take.
 func (d *DecodeBudget) Take(n int64) bool {
 	return d == nil || n <= 0 || d.b.left.Add(-n) >= 0
+}
+
+// Settle takes from the budget what is needed for Left to be at most left,
+// and reports whether Left is then not negative. It is for an extractor
+// that keeps a count of its own while it reads (left is what that count
+// says the document has left) and settles with the budget before it hands
+// an embedded document to Options.ExtractChild, and at the end. It never
+// gives back: if the budget already has less than left, it is unchanged.
+func (d *DecodeBudget) Settle(left int64) bool {
+	if d == nil {
+		return true
+	}
+	for {
+		l := d.b.left.Load()
+		if l <= left {
+			return l >= 0
+		}
+		if d.b.left.CompareAndSwap(l, left) {
+			return left >= 0
+		}
+	}
 }
 
 // Left returns the bytes not yet taken; a negative number once more was
