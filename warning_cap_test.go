@@ -195,9 +195,51 @@ func TestWarnCapAlternating(t *testing.T) {
 }
 
 func TestOmittedCount(t *testing.T) {
-	for msg, want := range map[string]int{"": 0, "7 more": 7, "123456789012345 more": 1000000000, "x": 0} {
-		if got := omittedCount(msg); (want < 1000000000 && got != want) || got < 0 {
-			t.Errorf("omittedCount(%q) = %d", msg, got)
+	for msg, want := range map[string]int{"": 0, "7 more": 7, "999999999 more": 999999999, "123456789012345 more": 999999999, "x": 0} {
+		if got := omittedCount(msg); got != want {
+			t.Errorf("omittedCount(%q) = %d, want %d", msg, got, want)
 		}
+	}
+}
+
+// At the top the count stops; it never wraps or falls.
+func TestWarnCapCountStops(t *testing.T) {
+	var p Part
+	fill(&p, MaxWarnings, SeverityInfo)
+	p.Warn(SeverityInfo, "x", "x")
+	p.Warnings[MaxWarnings].Message = "999999998 more warnings are not listed; at most 1000 are kept per part"
+	for i := 0; i < 3; i++ {
+		p.Warn(SeverityInfo, "x", "x")
+	}
+	if got := omittedCount(p.Warnings[MaxWarnings].Message); got != 999999999 {
+		t.Errorf("count %d", got)
+	}
+}
+
+// A part's summary that lands in a document's list is not the document's.
+func TestWarnCapPartSummaryInDocument(t *testing.T) {
+	d := New("txt")
+	for i := 0; i < MaxWarnings; i++ {
+		d.Warn(SeverityInfo, "x.many", "many")
+	}
+	d.Warnings = append(d.Warnings, Warning{Code: WarnWarningsOmitted, Severity: SeverityError, Message: "500 more warnings are not listed; at most 1000 are kept per part"})
+	d.Warn(SeverityInfo, "x.more", "more")
+	if w := lastWarning(d.Warnings); !strings.HasPrefix(w.Message, "1 more warning ") || !strings.HasSuffix(w.Message, "per document") || w.Severity != SeverityInfo {
+		t.Errorf("document summary %+v", w)
+	}
+}
+
+// Alternating direct appends and Warn past the bound costs the same per
+// call however long the list grows: the summary at MaxWarnings is found
+// at once.
+func TestWarnCapAlternatingSteps(t *testing.T) {
+	var p Part
+	fill(&p, MaxWarnings+1, SeverityInfo)
+	for i := 0; i < 200000; i++ {
+		p.Warnings = append(p.Warnings, Warning{Code: "x.direct", Severity: SeverityInfo})
+		p.Warn(SeverityInfo, "x.over", "over")
+	}
+	if w := p.Warnings[MaxWarnings]; !strings.HasPrefix(w.Message, "200001 more") {
+		t.Errorf("summary %+v", w)
 	}
 }

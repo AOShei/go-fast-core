@@ -194,7 +194,7 @@ Shared codes (constants `Warn*`):
 | `input.external_reference` | The input refers to a file or address outside itself other than by an ordinary hyperlink: a remote template, a linked picture, an action that sends or loads data. Nothing is fetched or sent |
 | `input.ambiguous` | The input can be read as two different documents depending on the program, such as an archive that names a member twice in two ways |
 | `limit.exceeded` | A limit was reached during extraction, one of `Options.Limits` or a fixed bound of the extractor; the output is cut or left out there, and the message says what |
-| `warnings.omitted` | More than `MaxWarnings` warnings were raised on the part or document; the rest are counted here, and the message begins with their number. Added by `Warn`, at the end of the list |
+| `warnings.omitted` | More than `MaxWarnings` warnings were raised on the part or document; the rest are counted here, and the message begins with their number. Added by `Warn` at the end of the list; warnings an extractor appends to the list directly can follow it |
 | `child.not_extracted` | An embedded document is listed but was not extracted |
 | `child.unsupported` | No extractor handles the embedded document's format, or it uses an unimplemented feature |
 | `child.encrypted` | The embedded document is encrypted and was not opened (no password, the wrong one, or no key for the certificate it is encrypted for) |

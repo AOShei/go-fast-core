@@ -85,6 +85,7 @@ package gofastcore
 import (
 	"iter"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -252,7 +253,9 @@ func (d *Document) Warn(severity Severity, code, message string) {
 // message begins with their number. The count is read back from that
 // warning, so it survives a copy of the part and a round trip through
 // JSON. It stays last unless an extractor appends to Warnings directly
-// after it; such appends are not bounded by MaxWarnings. Past the bound
+// after it; such appends are not bounded by MaxWarnings, and an extractor
+// that makes many of them past the bound may get a second summary. The
+// count stops at 999,999,999. Past the bound
 // Warn adds no entry and updates the summary in place: Has does not see
 // a warning that was only counted, code that remembers the index of a
 // warning it raises must check it, and two copies of a part that share
@@ -264,15 +267,23 @@ func addWarning(ws []Warning, where string, severity Severity, code, message str
 	if len(ws) < MaxWarnings {
 		return append(ws, Warning{Code: code, Severity: severity, Message: message})
 	}
-	// Warn adds the summary at index MaxWarnings or later, so only those
-	// entries are looked at: a summary merged in from elsewhere (a part's,
-	// in a document's list) is not this list's. The scan covers only what
-	// an extractor appended after the summary.
+	// Warn adds the summary at index MaxWarnings, unless direct appends
+	// had already taken the list past it; then it is near the end. Only
+	// those places are looked at, so a call costs the same however many
+	// warnings were appended directly, and only a summary written for
+	// this list ("... kept per part" or "... per document") is taken: a
+	// part's summary merged into a document's list is not the document's.
+	// An extractor that appends many warnings directly past the bound may
+	// so get more than one summary.
 	at := -1
-	for i := len(ws) - 1; i >= MaxWarnings; i-- {
-		if ws[i].Code == WarnWarningsOmitted {
-			at = i
-			break
+	if len(ws) > MaxWarnings && isSummary(ws[MaxWarnings], where) {
+		at = MaxWarnings
+	} else {
+		for i := len(ws) - 1; i > MaxWarnings && i >= len(ws)-summaryReach; i-- {
+			if isSummary(ws[i], where) {
+				at = i
+				break
+			}
 		}
 	}
 	if at < 0 {
@@ -280,7 +291,10 @@ func addWarning(ws []Warning, where string, severity Severity, code, message str
 		at = len(ws) - 1
 	}
 	sum := &ws[at]
-	n := omittedCount(sum.Message) + 1
+	n := omittedCount(sum.Message)
+	if n < maxOmitted {
+		n++
+	}
 	if severity.Valid() && (!sum.Severity.Valid() || severity > sum.Severity) {
 		sum.Severity = severity
 	}
@@ -295,14 +309,28 @@ func addWarning(ws []Warning, where string, severity Severity, code, message str
 	return ws
 }
 
-// omittedCount reads the number a warnings.omitted message begins with.
-// It stops below 10^9, so it fits an int on every platform.
+// summaryReach is how far back from the end of a list Warn looks for the
+// summary when it is not at index MaxWarnings.
+const summaryReach = 64
+
+// maxOmitted is where the count stops: it fits an int on every platform.
+const maxOmitted = 999_999_999
+
+func isSummary(w Warning, where string) bool {
+	return w.Code == WarnWarningsOmitted && strings.HasSuffix(w.Message, " are kept per "+where)
+}
+
+// omittedCount reads the number a warnings.omitted message begins with,
+// up to maxOmitted.
 func omittedCount(msg string) int {
 	n := 0
-	for i := 0; i < len(msg) && msg[i] >= '0' && msg[i] <= '9' && n < 100_000_000; i++ {
+	for i := 0; i < len(msg) && msg[i] >= '0' && msg[i] <= '9'; i++ {
+		if n > maxOmitted/10 {
+			return maxOmitted
+		}
 		n = n*10 + int(msg[i]-'0')
 	}
-	return n
+	return min(n, maxOmitted)
 }
 
 // AllBlocks iterates over every block of the document in reading order,
