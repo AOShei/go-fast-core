@@ -259,7 +259,8 @@ func (d *Document) Warn(severity Severity, code, message string) {
 // Warn adds no entry and updates the summary in place: Has does not see
 // a warning that was only counted, code that remembers the index of a
 // warning it raises must check it, and two copies of a part that share
-// one Warnings array share the summary. An extractor should still merge
+// one Warnings array share the summary, or overwrite each other's. A
+// summary copied in from another part's list counts on for this one. An extractor should still merge
 // warnings that repeat, with a count, rather than rely on this bound.
 const MaxWarnings = 1000
 

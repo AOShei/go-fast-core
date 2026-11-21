@@ -93,8 +93,9 @@ const (
 
 	// WarnWarningsOmitted: more warnings were raised on the part or the
 	// document than MaxWarnings, and the rest are counted here instead of
-	// listed. Part.Warn and Document.Warn add it and keep it last;
-	// extractors do not emit it themselves. Its message begins with the
+	// listed. Part.Warn and Document.Warn add it at the end of the list
+	// (warnings appended to the list directly can follow it); extractors
+	// do not emit it themselves. Its message begins with the
 	// number of warnings it counts, and its severity is the highest of
 	// theirs.
 	WarnWarningsOmitted = "warnings.omitted"
