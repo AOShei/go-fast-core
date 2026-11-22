@@ -88,7 +88,10 @@ const (
 	// output is cut or left out at that point. The limit is one of
 	// Options.Limits or a fixed bound of the extractor (the longest field
 	// instruction it keeps, the most columns of a table it reads); the
-	// message says which, and what was left out. Severity error.
+	// message says which, and what was left out. It covers anything that
+	// would appear in the output: text, cells, notes, metadata values,
+	// names, labels and addresses; a bound on data used only inside the
+	// extractor needs no warning. Severity error, for every such cut.
 	WarnLimitExceeded = "limit.exceeded"
 
 	// WarnWarningsOmitted: more warnings were raised on the part or the

@@ -2,6 +2,10 @@
 
 The module version is the Go module's tag. The schema version is the `schema_version` every document carries; it changes only when a field is removed or its meaning changes (README, "Schema evolution").
 
+## Not yet tagged
+
+- **Documentation.** The "Bounded input" convention and `WarnLimitExceeded` now say what a fixed bound must report. It must report anything that would appear in the output, names and metadata included, and always under `limit.exceeded` at `error`. A bound on data used only inside a library needs no warning, and a bound that ordinary files reach is raised. No code changes.
+
 ## v0.1.1 (schema 0.2)
 
 - **Warnings are bounded.** `Part.Warn` and `Document.Warn` keep at most `MaxWarnings` (1000) warnings on a part or a document. Past that, each further warning is counted in one last warning, `warnings.omitted` (`WarnWarningsOmitted`). Its severity is the highest of those it counts, and its message begins with their number. The count is read back from that warning, so it survives copies of a part and a round trip through JSON. It is added last; an extractor that appends to `Warnings` directly may put entries after it, and such appends are not bounded. The count stops at 999,999,999. Past the bound `Warn` adds no entry, so `Has` does not see a warning that was only counted. Before this, a file that raised a warning per code page or per charset label could give hundreds of thousands of them, and JSON many times its own size.
