@@ -262,15 +262,61 @@ type decoder struct {
 
 	lit, dist, len []uint32
 	lens           [numLit + 2 + numDist + 2]uint8
+
+	// Where the stream is, so that a Reader can stop when its buffer is
+	// full and go on: the block being read, and what was left of a
+	// symbol when it stopped.
+	state      uint8 // stateHeader, stateStored, stateHuffman
+	final      bool  // the block being read is the last
+	curLit     []uint32
+	curDist    []uint32
+	least      uint
+	storedLeft int  // bytes of a stored block still to copy; -1 before its length is read
+	hasLit     bool // litByte is still to be written
+	litByte    byte
+	pendLen    int // bytes of a match still to be copied, from pendBack back
+	pendBack   int
+	// stream: a Reader's decoder, whose out is a buffer it empties, not
+	// grows; atLimit: the end of that buffer is also the limit.
+	stream, atLimit bool
 }
 
-var decoders = sync.Pool{New: func() any {
+// The states of a decoder between calls of blocks.
+const (
+	stateHeader  = iota // at the start of a block
+	stateStored         // in a stored block
+	stateHuffman        // in a compressed block
+)
+
+// errFull: a Reader's buffer is full; the decoder stopped where it can
+// go on.
+var errFull = errors.New("inflate: buffer full")
+
+func newDecoder() *decoder {
 	return &decoder{
 		lit:  make([]uint32, 0, 1<<litBits+512),
 		dist: make([]uint32, 0, 1<<distBits+256),
 		len:  make([]uint32, 0, 1<<lenBits),
 	}
-}}
+}
+
+var decoders = sync.Pool{New: func() any { return newDecoder() }}
+
+// start readies d for a stream that begins at src[pos].
+func (d *decoder) start(src []byte, pos int) {
+	d.src, d.pos, d.acc, d.n = src, pos, 0, 0
+	d.state, d.final, d.storedLeft = stateHeader, false, -1
+	d.hasLit, d.pendLen, d.pendBack = false, 0, 0
+}
+
+// full is the error for output that has reached the end of out: errFull
+// for a Reader whose buffer it is, ErrLimit at the limit.
+func (d *decoder) full() error {
+	if d.stream && !d.atLimit {
+		return errFull
+	}
+	return ErrLimit
+}
 
 // Zlib appends the decompressed form of the zlib stream src to dst and
 // returns the result. limit bounds what is appended; at the limit the
@@ -345,7 +391,8 @@ func deflate(dst, src []byte, pos, end int) ([]byte, int, error) {
 	}
 
 	d := decoders.Get().(*decoder)
-	d.src, d.pos, d.acc, d.n = src, pos, 0, 0
+	d.start(src, pos)
+	d.stream = false
 	d.out, d.w, d.base, d.limit = dst[:min(cap(dst), end)], base, base, end
 	err := d.blocks()
 	out, w, after := d.out, d.w, d.pos-int(d.n>>3)
@@ -391,65 +438,81 @@ func (d *decoder) grow() {
 	d.out = grown
 }
 
-// blocks decodes the blocks of the stream.
+// blocks decodes the blocks of the stream, from where d is. With
+// errFull it stops where it can go on.
 func (d *decoder) blocks() error {
 	for {
-		head, ok := d.take(3)
-		if !ok {
-			return ErrShort
-		}
 		var err error
-		switch head >> 1 {
-		case 0:
-			err = d.stored()
-		case 1:
-			lit, dist := fixedTables()
-			err = d.huffman(lit, dist, 7)
-		case 2:
-			var shortest uint
-			if shortest, err = d.header(); err == nil {
-				err = d.huffman(d.lit, d.dist, shortest)
+		switch d.state {
+		case stateHeader:
+			head, ok := d.take(3)
+			if !ok {
+				return ErrShort
 			}
-		default:
-			err = ErrCorrupt
+			d.final = head&1 != 0
+			switch head >> 1 {
+			case 0:
+				d.state, d.storedLeft = stateStored, -1
+			case 1:
+				d.curLit, d.curDist = fixedTables()
+				d.least, d.state = 7, stateHuffman
+			case 2:
+				shortest, err := d.header()
+				if err != nil {
+					return err
+				}
+				d.curLit, d.curDist, d.least, d.state = d.lit, d.dist, shortest, stateHuffman
+			default:
+				return ErrCorrupt
+			}
+			continue
+		case stateStored:
+			err = d.stored()
+		case stateHuffman:
+			err = d.huffman(d.curLit, d.curDist, d.least)
 		}
 		if err != nil {
 			return err
 		}
-		if head&1 != 0 {
+		d.state = stateHeader
+		if d.final {
 			return nil
 		}
 	}
 }
 
-// stored copies a block that is not compressed.
+// stored copies a block that is not compressed, or what is left of it.
 func (d *decoder) stored() error {
-	// The block starts at the next whole byte. Give back the bytes that
-	// were loaded and not used.
-	d.pos -= int(d.n >> 3)
-	d.acc, d.n = 0, 0
 	src := d.src
-	if d.pos+4 > len(src) {
-		d.pos = len(src)
-		return ErrShort
+	if d.storedLeft < 0 {
+		// The block starts at the next whole byte. Give back the bytes
+		// that were loaded and not used.
+		d.pos -= int(d.n >> 3)
+		d.acc, d.n = 0, 0
+		if d.pos+4 > len(src) {
+			d.pos = len(src)
+			return ErrShort
+		}
+		size := int(binary.LittleEndian.Uint16(src[d.pos:]))
+		if uint16(size) != ^binary.LittleEndian.Uint16(src[d.pos+2:]) {
+			return ErrCorrupt
+		}
+		d.pos += 4
+		d.storedLeft = size
 	}
-	size := int(binary.LittleEndian.Uint16(src[d.pos:]))
-	if uint16(size) != ^binary.LittleEndian.Uint16(src[d.pos+2:]) {
-		return ErrCorrupt
-	}
-	d.pos += 4
-	n := min(size, len(src)-d.pos)
+	n := min(d.storedLeft, len(src)-d.pos)
 	room := min(n, d.limit-d.w)
 	for len(d.out)-d.w < room {
 		d.grow()
 	}
 	copy(d.out[d.w:], src[d.pos:d.pos+room])
 	d.w += room
-	d.pos += n
+	d.pos += room
+	d.storedLeft -= room
 	switch {
 	case room < n:
-		return ErrLimit
-	case n < size:
+		return d.full()
+	case d.storedLeft > 0:
 		return ErrShort
 	}
 	return nil
@@ -546,6 +609,28 @@ func (d *decoder) huffman(lit, dist []uint32, least uint) error {
 	var err error
 	_ = lit[1<<litBits-1]
 	_ = dist[1<<distBits-1]
+	// What a Reader's full buffer left of a symbol.
+	if d.hasLit {
+		if w == len(out) {
+			return d.full()
+		}
+		out[w] = d.litByte
+		w++
+		d.hasLit = false
+	}
+	for d.pendLen > 0 {
+		if w == len(out) {
+			d.w = w
+			return d.full()
+		}
+		from := w - d.pendBack
+		fits := min(d.pendLen, len(out)-w)
+		for i := 0; i < fits; i++ {
+			out[w+i] = out[from+i]
+		}
+		w += fits
+		d.pendLen -= fits
+	}
 loop:
 	for {
 		var e uint32
@@ -678,7 +763,9 @@ loop:
 		case kindLit:
 			if w == len(out) {
 				if len(out) == d.limit {
-					err = ErrLimit
+					if err = d.full(); err == errFull {
+						d.hasLit, d.litByte = true, byte(e>>16)
+					}
 					break loop
 				}
 				d.w = w
@@ -747,7 +834,9 @@ loop:
 				break
 			}
 			if len(out) == d.limit {
-				err = ErrLimit
+				if err = d.full(); err == errFull {
+					d.pendLen, d.pendBack = length, back
+				}
 				break loop
 			}
 			d.w = w

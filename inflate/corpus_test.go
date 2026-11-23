@@ -101,3 +101,40 @@ func BenchmarkRawCorpus(b *testing.B) {
 		}
 	})
 }
+
+// TestCorpusReader: a Reader gives what Raw gives on every member.
+func TestCorpusReader(t *testing.T) {
+	streams, _ := zipMembers()
+	if streams == nil {
+		t.Skip("GOFASTCORE_INFLATE_ZIPS names no list of zip files")
+	}
+	z := NewRawReader(nil, 0)
+	for _, s := range streams {
+		sameAsRaw(t, z, s, 1<<30, []int{4096})
+	}
+}
+
+// BenchmarkRawReaderCorpus reads every member through a Reader.
+func BenchmarkRawReaderCorpus(b *testing.B) {
+	streams, sizes := zipMembers()
+	if streams == nil {
+		b.Skip("GOFASTCORE_INFLATE_ZIPS names no list of zip files")
+	}
+	total := 0
+	for _, n := range sizes {
+		total += n
+	}
+	b.SetBytes(int64(total))
+	z := NewRawReader(nil, 0)
+	p := make([]byte, 32<<10)
+	for b.Loop() {
+		for _, s := range streams {
+			z.Reset(s, 1<<30)
+			for {
+				if _, err := z.Read(p); err != nil {
+					break
+				}
+			}
+		}
+	}
+}
