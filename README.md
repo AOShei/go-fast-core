@@ -371,8 +371,10 @@ Package `inflate` (`github.com/AOShei/go-fast-core/inflate`) decompresses deflat
 | `Zlib(dst, src, limit)` | a PDF stream (RFC 1950), Adler-32 checked | appended to `dst` in one pass |
 | `Gzip(dst, src, limit)` | a `.gz` file (RFC 1952), one member after another, CRC-32 and size checked | appended to `dst` in one pass |
 | `NewRawReader(src, limit)` | a member too large to hold whole | an `io.Reader`, holding 96 KiB; `Reset` reuses it |
+| `NewGzipReader(src, limit)` | a `.gz` file too large to hold decompressed (a `.tar.gz`) | an `io.Reader`, as `NewRawReader` |
+| `Decompressor` | the deflated members of a `zip.Reader`: `zr.RegisterDecompressor(zip.Deflate, inflate.Decompressor)` | through a pooled `NewRawReader`; archive/zip checks the CRC-32 |
 
-Each gives the bytes the standard library gives, also for a damaged stream: what was decompressed before the damage, with an error that says which kind it is (`ErrHeader`, `ErrCorrupt`, `ErrShort`, `ErrChecksum`). `limit` bounds the output; past it the output is cut and the error is `ErrLimit`. The tests and fuzz targets compare each with `compress/flate`, `compress/zlib` and `compress/gzip`.
+Each gives the bytes the standard library gives, also for a damaged stream: what was decompressed before the damage, with an error that says which kind it is (`ErrHeader`, `ErrCorrupt`, `ErrShort`, `ErrChecksum`). `limit` bounds the output; past it the output is cut and the error is `ErrLimit`. The tests and fuzz targets compare each with `compress/flate`, `compress/zlib` and `compress/gzip`. Through `Decompressor`, a damaged member can keep up to 32 KiB more of its output before the error than with `compress/flate` (or at most 4 KiB less): archive/zip drops the read that ends a member short of its size or passes it, and the reads are cut differently.
 
 ## Schema evolution
 
