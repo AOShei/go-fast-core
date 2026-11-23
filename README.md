@@ -8,7 +8,7 @@ Every extractor (`go-fast-pdf`, `go-fast-ooxml`, `go-fast-odf`, `go-fast-html`, 
 import "github.com/AOShei/go-fast-core" // package gofastcore
 ```
 
-**Status: module v0.1.1, schema version 0.2.** The module version is the Go module's tag; the schema version is the `schema_version` in every document and changes only as [Schema evolution](#schema-evolution) says. Schema 0.1 was agreed with the PDF extractor over two review rounds on 2026-11-18. Schema 0.2 (2026-11-20) replaced the hidden-text verdicts with what a file declares about display; see [What the file declares](#what-the-file-declares). Changes are in [CHANGELOG.md](CHANGELOG.md).
+**Status: module v0.1.2, schema version 0.2.** The module version is the Go module's tag; the schema version is the `schema_version` in every document and changes only as [Schema evolution](#schema-evolution) says. Schema 0.1 was agreed with the PDF extractor over two review rounds on 2026-11-18. Schema 0.2 (2026-11-20) replaced the hidden-text verdicts with what a file declares about display; see [What the file declares](#what-the-file-declares). Changes are in [CHANGELOG.md](CHANGELOG.md).
 
 ## Series conventions
 
@@ -187,12 +187,19 @@ Shared codes (constants `Warn*`):
 | `text.tracked_changes` | The part has tracked changes. Its text is given as if all were accepted; each deletion is kept as a `note` block of type `deletion` |
 | `structure.heading_level_clamped` | The part has headings deeper than six levels; each has level 6 and its real level in `Attrs["level"]` |
 | `text.unmapped_glyphs` | Some text has no Unicode mapping in the source and appears as U+FFFD or is absent |
+| `text.control_characters_removed` | Control characters (Unicode Cc other than tab and line feed) were removed from the text, as the text conventions require; the message says how many. Info |
+| `text.encoding_detected` | The input declares no character encoding and is not UTF-8; it was read in the encoding its bytes were recognised as, which the message names. An extractor uses one only where it is certain, and otherwise refuses the input. Warning |
 | `image.unsupported_encoding` | Image data was requested and an image uses an encoding the extractor cannot deliver; its block has no data |
 | `input.repaired` | The input was structurally damaged and was read by a recovery path |
+| `input.unread_content` | The input holds content of a kind the extractor does not read (an equation, a sound clip, a plug-in); the message names it. Warning |
+| `input.stream_damaged` | A stream or member of the file other than its main content (styles, properties, a manifest, a VBA project) could not be read to its end; what was read is used, and the message names it. Warning |
+| `input.decrypted` | The input was encrypted and was decrypted (`Metadata.Encrypted` is set); the message names the scheme and which password or certificate opened it. Info |
 | `input.trailing_data` | Data follows the logical end of the file; its text is in the stored part with `Attrs["stored"]` `after_end`. The message says how many bytes follow the end |
 | `input.active_content` | The input contains something meant to be run, or an instruction to run something: macros, scripts, an action that starts a program or opens a file. It is not read and never run |
 | `input.external_reference` | The input refers to a file or address outside itself other than by an ordinary hyperlink: a remote template, a linked picture, an action that sends or loads data. Nothing is fetched or sent |
 | `input.ambiguous` | The input can be read as two different documents depending on the program, such as an archive that names a member twice in two ways |
+| `table.region_split` | A sparse area of a sheet was written as tables of one row each instead of one mostly empty table; the message gives the count. Info |
+| `table.formula_no_value` | Cells hold formulas with no stored result, so they are empty; formulas are not evaluated. Info |
 | `limit.exceeded` | A limit was reached during extraction, one of `Options.Limits` or a fixed bound of the extractor; the output is cut or left out there, and the message says what |
 | `warnings.omitted` | More than `MaxWarnings` warnings were raised on the part or document; the rest are counted here, and the message begins with their number. Added by `Warn` at the end of the list; warnings an extractor appends to the list directly can follow it |
 | `child.not_extracted` | An embedded document is listed but was not extracted |
@@ -200,7 +207,7 @@ Shared codes (constants `Warn*`):
 | `child.encrypted` | The embedded document is encrypted and was not opened (no password, the wrong one, or no key for the certificate it is encrypted for) |
 | `child.failed` | Extraction of an embedded document failed for any other reason |
 
-An extractor may add codes of its own under a format prefix, such as `pdf.font_missing`.
+An extractor may add codes of its own under a format prefix, such as `pdf.font_missing`, for events only its format has. **An event a shared code describes is always raised with that code, at the severity given here, and never with a code of the extractor's own**: a caller handles "control characters were removed" with one code, whatever the format. Where a library removes control characters, decrypts, or recognises an encoding, it says so with the shared code, not silently.
 
 This is how a caller handles scanned pages without go-fast knowing anything about OCR:
 
@@ -292,7 +299,7 @@ type Extractor interface {
 
 ### Encrypted input
 
-An extractor that decrypts its input sets `Metadata.Encrypted`. The field states what the input was, not who supplied the password: it is set also when the file opens with a password its format defines for files meant to open without one (a PDF with an empty user password, an Excel workbook encrypted with `VelvetSweatshop`). A library may add an `info` warning of its own that names the scheme or the password used; the field is what a caller tests. Input that is not decrypted is an error (`ErrPasswordRequired`, `ErrWrongPassword`, `ErrKeyRequired`), or `child.encrypted` for an embedded document.
+An extractor that decrypts its input sets `Metadata.Encrypted`. The field states what the input was, not who supplied the password: it is set also when the file opens with a password its format defines for files meant to open without one (a PDF with an empty user password, an Excel workbook encrypted with `VelvetSweatshop`). The document also carries `input.decrypted` (info), whose message names the scheme and the password or certificate used; the field is what a caller tests. Input that is not decrypted is an error (`ErrPasswordRequired`, `ErrWrongPassword`, `ErrKeyRequired`), or `child.encrypted` for an embedded document.
 
 ### Errors
 

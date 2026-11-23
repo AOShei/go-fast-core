@@ -37,6 +37,20 @@ const (
 	// source and appears as U+FFFD or is absent.
 	WarnTextUnmappedGlyphs = "text.unmapped_glyphs"
 
+	// WarnTextControlCharactersRemoved: control characters (Unicode Cc
+	// other than tab and line feed: NUL, form feed, carriage return, the
+	// C1 controls, ...) were removed from extracted text, as the text
+	// conventions require; they have no meaning as text. The message
+	// says how many. Severity info. Every extractor that removes any
+	// raises it, once per part or document with the count.
+	WarnTextControlCharactersRemoved = "text.control_characters_removed"
+	// WarnTextEncodingDetected: the input declares no character encoding
+	// and is not valid UTF-8; it was read in the encoding its bytes were
+	// recognised as, which the message names, with how to give one
+	// instead. Severity warning: the encoding is not declared, though an
+	// extractor uses one only where it is certain and refuses the input
+	// otherwise.
+	WarnTextEncodingDetected = "text.encoding_detected"
 	// WarnTextTrackedChanges: the part has tracked changes. Its text is
 	// given as if all were accepted; each deletion is kept as a note block
 	// of type NoteDeletion.
@@ -56,6 +70,23 @@ const (
 	// by a recovery path. Severity info if nothing is known to be lost.
 	WarnInputRepaired = "input.repaired"
 
+	// WarnInputUnreadContent: the input holds content of a kind the
+	// extractor does not read (an equation, a sound or video clip, a
+	// plug-in, a dialog sheet); the message names the kind and how many.
+	// It is not in the output. Severity warning.
+	WarnInputUnreadContent = "input.unread_content"
+	// WarnInputStreamDamaged: a stream or member of the file other than
+	// its main content (styles, numbering, notes, document properties, a
+	// manifest, a VBA project, an embedded object) could not be read to
+	// its end; what was read before the damage is used. The message names
+	// it. "Stream" is a piece of the file, not a Part of the document.
+	// Severity warning.
+	WarnInputStreamDamaged = "input.stream_damaged"
+	// WarnInputDecrypted: the input was encrypted and was decrypted, and
+	// Metadata.Encrypted is set. The message names the scheme, and which
+	// password (the caller's, or one the format defines for files meant to
+	// open without one) or certificate opened it. Severity info.
+	WarnInputDecrypted = "input.decrypted"
 	// WarnInputActiveContent: the input contains something meant to be
 	// run, or an instruction to run something: macros, scripts, an action
 	// that starts a program or opens a file (a PDF Launch action). It is
@@ -84,6 +115,18 @@ const (
 	// follow the end.
 	WarnInputTrailingData = "input.trailing_data"
 
+	// WarnTableRegionSplit: an area of a sheet whose cells are spread so
+	// thinly that the rectangle around them is mostly empty was not
+	// written as one table: each run of cells side by side in a row is a
+	// table of one row. The message gives the sheet and the count.
+	// Severity info: no cell is lost.
+	WarnTableRegionSplit = "table.region_split"
+	// WarnTableFormulaNoValue: cells hold formulas with no stored result
+	// (a program wrote the file without calculating it), so they are
+	// empty; formulas are not evaluated, and are in Table.Cells when
+	// Options.Cells is set. One warning per part with the count.
+	// Severity info.
+	WarnTableFormulaNoValue = "table.formula_no_value"
 	// WarnLimitExceeded: a limit was reached during extraction and the
 	// output is cut or left out at that point. The limit is one of
 	// Options.Limits or a fixed bound of the extractor (the longest field
