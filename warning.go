@@ -37,12 +37,14 @@ const (
 	// source and appears as U+FFFD or is absent.
 	WarnTextUnmappedGlyphs = "text.unmapped_glyphs"
 
-	// WarnTextControlCharactersRemoved: control characters (Unicode Cc
-	// other than tab and line feed: NUL, form feed, carriage return, the
-	// C1 controls, ...) were removed from extracted text, as the text
-	// conventions require; they have no meaning as text. The message
-	// says how many. Severity info. Every extractor that removes any
-	// raises it, once per part or document with the count.
+	// WarnTextControlCharactersRemoved: control characters (Unicode Cc)
+	// with no meaning as text were removed from extracted text, as the
+	// text conventions require: NUL, ESC, the C1 controls and the like.
+	// Not counted are those the format reads as something: tab, line
+	// ends (a carriage return), and white space or a break (a form feed
+	// in HTML, or between pages). The message says how many. Severity
+	// info. Every extractor that removes any raises it, once per part or
+	// document with the count.
 	WarnTextControlCharactersRemoved = "text.control_characters_removed"
 	// WarnTextEncodingDetected: the input declares no character encoding
 	// and is not valid UTF-8; it was read in the encoding its bytes were

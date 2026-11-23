@@ -187,7 +187,7 @@ Shared codes (constants `Warn*`):
 | `text.tracked_changes` | The part has tracked changes. Its text is given as if all were accepted; each deletion is kept as a `note` block of type `deletion` |
 | `structure.heading_level_clamped` | The part has headings deeper than six levels; each has level 6 and its real level in `Attrs["level"]` |
 | `text.unmapped_glyphs` | Some text has no Unicode mapping in the source and appears as U+FFFD or is absent |
-| `text.control_characters_removed` | Control characters (Unicode Cc other than tab and line feed) were removed from the text, as the text conventions require; the message says how many. Info |
+| `text.control_characters_removed` | Control characters (Unicode Cc) with no meaning as text were removed, as the text conventions require: NUL, ESC, the C1 controls and the like, not tabs, line ends or what the format reads as white space or a break. The message says how many. Info |
 | `text.encoding_detected` | The input declares no character encoding and is not UTF-8; it was read in the encoding its bytes were recognised as, which the message names. An extractor uses one only where it is certain, and otherwise refuses the input. Warning |
 | `image.unsupported_encoding` | Image data was requested and an image uses an encoding the extractor cannot deliver; its block has no data |
 | `input.repaired` | The input was structurally damaged and was read by a recovery path |
