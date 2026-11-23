@@ -23,5 +23,7 @@ func FuzzDocumentJSON(f *testing.F) {
 		d.WriteMarkdown(io.Discard, ro)
 		d.WriteText(io.Discard, ro)
 		d.WriteMarkdown(io.Discard, nil)
+		renderEverySink(t, &d, nil)
+		renderEverySink(t, &d, ro)
 	})
 }

@@ -2,6 +2,7 @@ package gofastcore
 
 import (
 	"bufio"
+	"bytes"
 	"io"
 	"slices"
 	"strconv"
@@ -49,6 +50,7 @@ type RenderOptions struct {
 // default options.
 func (d *Document) Markdown() string {
 	var sb strings.Builder
+	sb.Grow(d.sizeHint(true))
 	d.WriteMarkdown(&sb, nil)
 	return sb.String()
 }
@@ -59,6 +61,7 @@ func (d *Document) Markdown() string {
 // tab-separated, and images contribute their alt text.
 func (d *Document) Text() string {
 	var sb strings.Builder
+	sb.Grow(d.sizeHint(false))
 	d.WriteText(&sb, nil)
 	return sb.String()
 }
@@ -90,7 +93,7 @@ func (p *Part) Markdown() string { return p.render(true) }
 func (p *Part) Text() string { return p.render(false) }
 
 func (d *Document) render(w io.Writer, opts *RenderOptions, md bool) error {
-	r := renderer{w: bufio.NewWriter(w), md: md}
+	r := newRenderer(w, md)
 	if opts != nil {
 		r.opts = *opts
 	}
@@ -141,16 +144,39 @@ func (r *renderer) marker(label string) {
 
 func (p *Part) render(md bool) string {
 	var sb strings.Builder
-	r := renderer{w: bufio.NewWriter(&sb), md: md}
+	sb.Grow(p.sizeHint(md))
+	r := newRenderer(&sb, md)
 	r.part(p)
 	r.finish()
 	return sb.String()
 }
 
+// sink is what the renderer writes to.
+type sink interface {
+	io.Writer
+	io.StringWriter
+	io.ByteWriter
+}
+
+// newRenderer returns a renderer that writes to w. A strings.Builder or a
+// bytes.Buffer is written to directly, since a buffer in front of it would
+// only copy the text once more; any other writer through a bufio.Writer.
+func newRenderer(w io.Writer, md bool) renderer {
+	switch s := w.(type) {
+	case *strings.Builder:
+		return renderer{w: s, md: md}
+	case *bytes.Buffer:
+		return renderer{w: s, md: md}
+	}
+	bw := bufio.NewWriter(w)
+	return renderer{w: bw, buf: bw, md: md}
+}
+
 // renderer writes blocks without a trailing newline; the separator that
 // belongs between two blocks is chosen when the second one is written.
 type renderer struct {
-	w    *bufio.Writer
+	w    sink
+	buf  *bufio.Writer // the buffer in front of the writer, if any
 	opts RenderOptions
 	md   bool
 	any  bool // something has been written
@@ -173,7 +199,52 @@ func (r *renderer) finish() error {
 	if r.any {
 		r.w.WriteByte('\n')
 	}
-	return r.w.Flush()
+	if r.buf == nil {
+		return nil
+	}
+	return r.buf.Flush()
+}
+
+// sizeHint is about the length of the document's own parts rendered with
+// default options, so that Text and Markdown can allocate their result
+// once. Furniture and stored data, which the defaults leave out, are not
+// counted; Markdown's syntax is allowed for roughly. A hint too small
+// only costs the builder a reallocation.
+func (d *Document) sizeHint(md bool) int {
+	n := 0
+	for i := range d.Parts {
+		n += d.Parts[i].sizeHint(md)
+	}
+	return n
+}
+
+func (p *Part) sizeHint(md bool) int {
+	if p.Kind == PartStored {
+		return 0
+	}
+	n := 0
+	for i := range p.Blocks {
+		b := &p.Blocks[i]
+		if b.Kind.Furniture() || b.Attrs[AttrStored] != "" {
+			continue
+		}
+		n += len(b.Text) + len(b.Marker) + 2 // 2: the separator before it
+		if md {
+			n += 8 // a marker, a prefix or a fence, about
+		}
+		if b.Table != nil {
+			for _, row := range b.Table.Rows {
+				n++
+				for _, c := range row {
+					n += len(c) + 1
+					if md {
+						n += 2
+					}
+				}
+			}
+		}
+	}
+	return n
 }
 
 func (r *renderer) part(p *Part) {
