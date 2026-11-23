@@ -2,7 +2,7 @@
 
 The shared document model and extractor interface for the go-fast-* extraction libraries. Standard library only.
 
-Every extractor (`go-fast-pdf`, `go-fast-ooxml`, `go-fast-odf`, `go-fast-html`, `go-fast-rtf`, `go-fast-email`) returns the same `*gofastcore.Document`, so chunkers, indexers and knowledge-graph builders are written once and work for every format.
+Every extractor (`go-fast-pdf`, `go-fast-ooxml`, `go-fast-odf`, `go-fast-html`, `go-fast-rtf`, `go-fast-email`, `go-fast-msbin`) returns the same `*gofastcore.Document`, so chunkers, indexers and knowledge-graph builders are written once and work for every format.
 
 ```go
 import "github.com/AOShei/go-fast-core" // package gofastcore
@@ -282,13 +282,17 @@ type Extractor interface {
 | `Workers` | Goroutines inside one document; 0 means all CPUs |
 | `Images` | `ImagesMeta`, the default: a block for every image, with its place, size and alternative text. `ImagesData`: the bytes too. `ImagesNone`: no image blocks, and so no alternative text |
 | `Spans` | Ask for inline formatting and links |
-| `Password` | Tried on encrypted input, and passed down to embedded documents |
+| `Password` | Tried on encrypted input, and passed down to embedded documents. An extractor that decrypts the input sets `Metadata.Encrypted` (see below) |
 | `Keys` | Private keys (`crypto.Decrypter`) tried on input encrypted for a certificate: the one whose public half matches a recipient the file names. Passed down like `Password` |
 | `Cells` | Ask for the formulas, types and stored values of table cells in `Table.Cells` |
 | `Parts` | `PartRange{First, Last}`, inclusive part numbers; zero value means all; a range that selects nothing is `ErrNoPartsSelected` |
 | `Limits` | `MaxInputBytes`, `MaxDecodedBytes`, `MaxTextBytes`, `MaxParts`, `MaxDepth`. Zero means the default; negative means no limit |
 | `Child` | Function that extracts embedded documents; see below |
 | `Name` | Recorded as `Source.Name` |
+
+### Encrypted input
+
+An extractor that decrypts its input sets `Metadata.Encrypted`. The field states what the input was, not who supplied the password: it is set also when the file opens with a password its format defines for files meant to open without one (a PDF with an empty user password, an Excel workbook encrypted with `VelvetSweatshop`). A library may add an `info` warning of its own that names the scheme or the password used; the field is what a caller tests. Input that is not decrypted is an error (`ErrPasswordRequired`, `ErrWrongPassword`, `ErrKeyRequired`), or `child.encrypted` for an embedded document.
 
 ### Errors
 
@@ -359,14 +363,17 @@ render.Apply(ro)
 | Format (library) | Part kind | Notes |
 |---|---|---|
 | pdf (go-fast-pdf) | `page` | `BBox` on blocks; structure is `inferred` unless the PDF is tagged or the outline confirms a heading; `Loc.Anchor` from named destinations and the `/ID` of structure elements |
-| docx (go-fast-ooxml), odt and fodt (go-fast-odf), rtf (go-fast-rtf) | one `body` | Heading styles and outline levels give levels; numbered headings and list items carry `Marker`; comments, tracked deletions, field instructions and the values of drop-down controls become `note`; `Loc.Anchor` is the paragraph id (docx, odt) or the bookmark that starts the paragraph (rtf) |
-| pptx (go-fast-ooxml), odp and fodp (go-fast-odf) | `slide` | `Name` is the slide title; speaker notes become `note` |
-| xlsx (go-fast-ooxml), ods and fods (go-fast-odf) | `sheet` | `Name` is the sheet name; each used region is a `table` with `Loc.Range`; drop-down lists become `note` blocks of type `choices`; defined names and macro sheets go to the `stored` part |
+| docx (go-fast-ooxml), doc (go-fast-msbin), odt and fodt (go-fast-odf), rtf (go-fast-rtf) | one `body` | Heading styles and outline levels give levels; numbered headings and list items carry `Marker`; comments, tracked deletions, field instructions and the values of drop-down controls become `note`; `Loc.Anchor` is the paragraph id (docx, odt) or the bookmark that starts the paragraph (rtf, doc) |
+| pptx (go-fast-ooxml), ppt (go-fast-msbin), odp and fodp (go-fast-odf) | `slide` | `Name` is the slide title; speaker notes become `note` |
+| xlsx (go-fast-ooxml), xls (go-fast-msbin), ods and fods (go-fast-odf) | `sheet` | `Name` is the sheet name; each used region is a `table` with `Loc.Range`; drop-down lists become `note` blocks of type `choices`; defined names and macro sheets go to the `stored` part |
 | html, md, txt (go-fast-html) | one `body` | `Loc.Offset`/`Length` into the source; `Loc.Anchor` from `id` attributes |
+| csv, tsv (go-fast-html) | one `sheet` | `Name` is the file name; the rows are a `table`, split by rows past 1,000 rows, each piece with `Loc.Range` |
+| ipynb (go-fast-html) | one `body` | Markdown cells read as Markdown; code cells are `code` blocks with the notebook's language; each output follows its cell with `Attrs["output"]`; `Loc.Anchor` is the cell id |
+| json, yaml (go-fast-html) | one `body` | The text as written, in `code` blocks whose language is the format, split at line ends past a size; a block per YAML document; nothing parsed |
 | epub (go-fast-html) | `chapter` | One per spine item; nav becomes `Outline` |
 | eml, msg, mbox, tnef (go-fast-email) | `message` | One part per message. For a single message every header is in `Metadata.Extra`; in a mailbox the headers a mail program does not show are a `note` of type `headers`. Attachments in `Children` |
 
-go-fast-ooxml reads the macro and template variants of docx, xlsx and pptx, and binary workbooks (`.xlsb`), under those three format names. Each library's README gives the details. go-fast-pdf's MIGRATION.md maps its API before the shared model to this one.
+go-fast-ooxml reads the macro and template variants of docx, xlsx and pptx, and binary workbooks (`.xlsb`), under those three format names. go-fast-msbin reads the templates and shows of the three binary formats, the workbooks of Excel 5 and 95 and the documents of Word 6 and 95, under the names doc, xls and ppt. Each library's README gives the details. go-fast-pdf's MIGRATION.md maps its API before the shared model to this one.
 
 ## Example output
 
