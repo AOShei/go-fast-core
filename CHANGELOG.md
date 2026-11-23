@@ -2,7 +2,17 @@
 
 The module version is the Go module's tag. The schema version is the `schema_version` every document carries; it changes only when a field is removed or its meaning changes (README, "Schema evolution").
 
-## Not yet tagged
+## v0.1.2 (schema 0.2)
+
+- **Seven shared warning codes** for events that several libraries raised under codes of their own, or not at all. Each library now raises the shared code, at the severity given, and never one of its own for the same event:
+  - `text.control_characters_removed` (info), replacing `ooxml.`, `odf.`, `rtf.` and `msbin.control_characters_removed`, and raised now by pdf, html and email, which removed them silently;
+  - `text.encoding_detected` (warning), for input that declares no encoding and is read in one recognised from its bytes (go-fast-html's `html.charset_detected` before its release);
+  - `input.unread_content` (warning), replacing the four `…unread_content`;
+  - `input.stream_damaged` (warning), replacing `…part_damaged` and `…properties_damaged`: a stream of the file, not a `Part` of the document;
+  - `input.decrypted` (info), replacing `ooxml.` and `msbin.decrypted`, and raised now by pdf and odf;
+  - `table.region_split` (info) and `table.formula_no_value` (info), replacing the libraries' codes of those names.
+  
+  Additions only: nothing in core changes, and the schema stays 0.2. The README says the rule.
 
 - **Documentation.** The "Bounded input" convention and `WarnLimitExceeded` now say what a fixed bound must report. It must report anything that would appear in the output, names and metadata included, and always under `limit.exceeded` at `error`. A bound on data used only inside a library needs no warning, and a bound that ordinary files reach is raised. No code changes.
 
