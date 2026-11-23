@@ -2,8 +2,9 @@
 
 The module version is the Go module's tag. The schema version is the `schema_version` every document carries; it changes only when a field is removed or its meaning changes (README, "Schema evolution").
 
-## Unreleased
+## Unreleased (schema 0.2)
 
+- **`Table.RowLocs`** (JSON `row_locs`): where each row of a table came from, for a source that can say it (a byte span, an anchor, a box). Empty, or one `Location` per row in the order of `Rows`; `Validate` checks the count and each location. An addition: tables without it are written as before, and the schema stays 0.2.
 - **`Text` and `Markdown` allocate their result once.** They size it from the document's text before rendering, and write into it directly instead of through a 4 KiB `bufio.Writer` over a builder that doubled as it grew. `WriteText` and `WriteMarkdown` write a `strings.Builder` or `bytes.Buffer` directly too; other writers are still buffered. On a document of 800 paragraphs, `Text` allocates 90 KB in 2 allocations instead of 355 KB in 12, and takes 14 µs instead of 35 µs. The output is unchanged: a test and the fuzz target render every document through each kind of writer and compare.
 
 ## v0.1.2 (schema 0.2)

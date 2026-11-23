@@ -363,6 +363,11 @@ type Table struct {
 	// Limits.MaxTextBytes. The renderers write links, never formulas or
 	// values: a formula can hold text that nobody sees on the sheet.
 	Cells []CellDetail `json:"cells,omitempty"`
+	// RowLocs says where each row came from, for a source that can say it: a
+	// byte span, an anchor the source gives the row, a box on the page. It is
+	// empty, or has one entry per row in the order of Rows; a row with
+	// nothing to say has a zero Location. Block.Loc still covers the whole table.
+	RowLocs []Location `json:"row_locs,omitempty"`
 }
 
 // CellDetail is what one cell of a table holds besides its displayed
