@@ -354,6 +354,20 @@ func (v *validator) table(t *Table, bp string) {
 		v.text(cp+".formula", c.Formula) // verbatim, as the source writes it
 		v.text(cp+".value", c.Value)
 	}
+	if n := len(t.RowLocs); n != 0 && n != len(t.Rows) {
+		v.bad("%s: %d row_locs for %d rows", bp, n, len(t.Rows))
+	}
+	for r, l := range t.RowLocs {
+		lp := fmt.Sprintf("%s.table.row_locs[%d]", bp, r)
+		if l.BBox.X1 < l.BBox.X0 || l.BBox.Y1 < l.BBox.Y0 {
+			v.bad("%s: bbox has negative size", lp)
+		}
+		v.text(lp+".range", l.Range)
+		v.text(lp+".anchor", l.Anchor)
+		if l.Offset < 0 || l.Length < 0 {
+			v.bad("%s: negative source offset or length", lp)
+		}
+	}
 	if t.HeaderRows < 0 || t.HeaderRows > len(t.Rows) {
 		v.bad("%s: header_rows %d outside 0-%d", bp, t.HeaderRows, len(t.Rows))
 	}

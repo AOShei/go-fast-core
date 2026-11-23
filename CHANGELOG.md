@@ -2,6 +2,10 @@
 
 The module version is the Go module's tag. The schema version is the `schema_version` every document carries; it changes only when a field is removed or its meaning changes (README, "Schema evolution").
 
+## Unreleased (schema 0.2)
+
+- **`Table.RowLocs`** (JSON `row_locs`): where each row of a table came from, for a source that can say it (a byte span, an anchor, a box). Empty, or one `Location` per row in the order of `Rows`; `Validate` checks the count and each location. An addition: tables without it are written as before, and the schema stays 0.2.
+
 ## v0.1.2 (schema 0.2)
 
 - **Seven shared warning codes** for events that several libraries raised under codes of their own, or not at all. Each library now raises the shared code, at the severity given, and never one of its own for the same event:
