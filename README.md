@@ -2,7 +2,7 @@
 
 The shared document model and extractor interface for the go-fast-* extraction libraries. Standard library only.
 
-Every extractor (`go-fast-pdf`, `go-fast-ooxml`, `go-fast-odf`, `go-fast-html`, `go-fast-rtf`, `go-fast-email`, `go-fast-msbin`) returns the same `*gofastcore.Document`, so chunkers, indexers and knowledge-graph builders are written once and work for every format.
+Every extractor (`go-fast-pdf`, `go-fast-ooxml`, `go-fast-odf`, `go-fast-html`, `go-fast-rtf`, `go-fast-email`, `go-fast-msbin`, `go-fast-xml`) returns the same `*gofastcore.Document`, so chunkers, indexers and knowledge-graph builders are written once and work for every format.
 
 ```go
 import "github.com/AOShei/go-fast-core" // package gofastcore
@@ -412,10 +412,11 @@ It was go-fast-ooxml's recovery, which go-fast-odf had copied.
 | csv, tsv (go-fast-html) | one `sheet` | `Name` is the file name; the rows are a `table`, split by rows past 1,000 rows, each piece with `Loc.Range` |
 | ipynb (go-fast-html) | one `body` | Markdown cells read as Markdown; code cells are `code` blocks with the notebook's language; each output follows its cell with `Attrs["output"]`; `Loc.Anchor` is the cell id |
 | json, yaml (go-fast-html) | one `body` | The text as written, in `code` blocks whose language is the format, split at line ends past a size; a block per YAML document; nothing parsed |
+| xml (go-fast-xml) | one `body`; a profile may start more parts, `body` or `chapter` | A schema with a profile (12 built in, or one the caller loads) is read as headings, lists, tables, notes and metadata, `native`; any other XML is read generically, a `paragraph` per element that holds text, `inferred`, with the element path in `Attrs["element"]`. `Loc.Offset`/`Length` are bytes of the file on every block, `Table.RowLocs` gives them per row, and `Loc.Anchor` is the id the profile names |
 | epub (go-fast-html) | `chapter` | One per spine item; nav becomes `Outline` |
 | eml, msg, mbox, tnef (go-fast-email) | `message` | One part per message. For a single message every header is in `Metadata.Extra`; in a mailbox the headers a mail program does not show are a `note` of type `headers`. Attachments in `Children` |
 
-go-fast-ooxml reads the macro and template variants of docx, xlsx and pptx, and binary workbooks (`.xlsb`), under those three format names. go-fast-msbin reads the templates and shows of the three binary formats, the workbooks of Excel 5 and 95 and the documents of Word 6 and 95, under the names doc, xls and ppt. Each library's README gives the details. go-fast-pdf's MIGRATION.md maps its API before the shared model to this one.
+go-fast-ooxml reads the macro and template variants of docx, xlsx and pptx, and binary workbooks (`.xlsb`), under those three format names. go-fast-msbin reads the templates and shows of the three binary formats, the workbooks of Excel 5 and 95 and the documents of Word 6 and 95, under the names doc, xls and ppt. go-fast-xml chooses a profile by the document's root element and names it in `Metadata.Extra["xml.profile"]`; its README lists the built-in profiles (Akoma Ntoso, HL7 CDA, CLML, DITA, DocBook, Formex, JATS, Légifrance, patents, S1000D, Service-Public, TEI). Each library's README gives the details. go-fast-pdf's MIGRATION.md maps its API before the shared model to this one.
 
 ## Example output
 
