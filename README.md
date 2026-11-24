@@ -378,13 +378,13 @@ Each gives the bytes the standard library gives, also for a damaged stream: what
 
 ### Zip archives cut short
 
-Package `ziprecover` (`github.com/AOShei/go-fast-core/ziprecover`) opens a zip archive the same way for every library, including one cut short in transit (a stopped download, a crawl's size cap), which has lost the directory at its end. `Open(r, size, limits)` returns a `*zip.Reader` with `inflate.Decompressor` registered. For a cut file it also returns a `*Recovery` saying what was found, and `Recovery.Message` gives the text of the `input.repaired` warning, worded the same in every library.
+Package `ziprecover` (`github.com/AOShei/go-fast-core/ziprecover`) opens a zip archive the same way for every library, including one cut short in transit (a stopped download, a crawl's size cap), which has lost the directory at its end. `Open(r, size, limits)` returns a `*zip.Reader` with `inflate.Decompressor` registered, or for a file that is not a zip, archive/zip's error (matching `ErrNotZip`). For a cut file it also returns a `*Recovery` saying what was found, and `Recovery.Message` gives the text of the `input.repaired` warning, worded the same in every library.
 
 - **How members are found.** Recovery runs only when the directory cannot be read and the file begins with a member's header. It reads the headers in order from the first byte and stops at the first offset that holds none. It never searches for things that look like headers, so a header inside a member's data (a zip stored in the archive) is never taken for a member.
 - **A member whose sizes follow its data** is decompressed to find where it ends, which also gives its size and CRC-32. Its directory entry is then written, and archive/zip checks every whole member's CRC-32 as usual.
 - **The member the file ends inside** is kept. Reading it ends in an error after the text that is there.
 - **A zip stored inside a cut archive.** `archive/zip` alone would read that zip's directory as the file's own, so `Open` checks that the directory lists the member at the file's first byte, and recovers the file if it does not.
-- **Bounds:** `Limits.MaxMembers` (`ErrTooManyMembers`) and `Limits.MaxDecodedBytes`, the decompression done to find member ends (`ErrBudget`). Files of 4 GiB or more are not recovered, as a directory of the plain kind cannot describe them.
+- **Bounds:** `Limits.MaxMembers`, the members recovery finds (`ErrTooManyMembers`; a sound archive's members are the caller's to count), and `Limits.MaxDecodedBytes`, the decompression done to find member ends (`ErrBudget`). Files of 4 GiB or more are not recovered, as a directory of the plain kind cannot describe them.
 - **Speed and memory.** A file of up to 32 MiB is read into memory once to find member ends with `inflate`; a larger one is read from the file with `compress/flate`.
 
 It was go-fast-ooxml's recovery, which go-fast-odf had copied.

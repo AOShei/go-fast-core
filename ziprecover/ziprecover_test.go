@@ -166,8 +166,15 @@ func TestOpenSound(t *testing.T) {
 			t.Errorf("%s: %d bytes, %v", name, len(m.data), m.err)
 		}
 	}
-	if _, _, err := Open(bytes.NewReader(data), int64(len(data)), Limits{MaxMembers: 3}); !errors.Is(err, ErrTooManyMembers) {
-		t.Errorf("more members than allowed: %v", err)
+	// A sound archive's members are the caller's to count.
+	if zr, _, err := Open(bytes.NewReader(data), int64(len(data)), Limits{MaxMembers: 3}); err != nil || len(zr.File) != len(order) {
+		t.Errorf("a sound archive with more members than recovery may find: %v", err)
+	}
+	// Not an archive: archive/zip's error, which is also ErrNotZip.
+	junk := []byte("not an archive, but long enough to be looked at as one")
+	_, _, err = Open(bytes.NewReader(junk), int64(len(junk)), Limits{})
+	if !errors.Is(err, ErrNotZip) || !errors.Is(err, zip.ErrFormat) || err.Error() != zip.ErrFormat.Error() {
+		t.Errorf("not an archive: %v", err)
 	}
 }
 

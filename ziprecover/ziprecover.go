@@ -38,7 +38,8 @@ import (
 
 var (
 	// ErrNotZip: the directory cannot be read, and the file does not
-	// begin with a member's header.
+	// begin with a member's header. The error Open returns is
+	// archive/zip's, with its text, and matches ErrNotZip with errors.Is.
 	ErrNotZip = errors.New("ziprecover: not a zip archive")
 	// ErrNoMembers: the file begins as an archive does, but no member
 	// could be recovered: it is cut short inside its first header.
@@ -46,7 +47,7 @@ var (
 	// ErrBudget: finding where the members end decompressed more than
 	// Limits.MaxDecodedBytes.
 	ErrBudget = errors.New("ziprecover: decompressed size limit reached")
-	// ErrTooManyMembers: the archive has more members than
+	// ErrTooManyMembers: recovery found more members than
 	// Limits.MaxMembers.
 	ErrTooManyMembers = errors.New("ziprecover: too many members")
 )
@@ -54,9 +55,12 @@ var (
 // Limits bounds what Open does. The zero value bounds nothing but what
 // the format does.
 type Limits struct {
-	// MaxMembers bounds the members of the archive, sound or recovered:
-	// more is ErrTooManyMembers. A recovered archive never has more than
-	// 65,535, what a directory of the plain kind can hold. 0: no bound.
+	// MaxMembers bounds the members recovery finds: more is
+	// ErrTooManyMembers, and the headers are not read past it. A
+	// recovered archive never has more than 65,535, what a directory of
+	// the plain kind can hold. 0: no bound. A sound archive's directory
+	// is read by archive/zip whole; its members are for the caller to
+	// count, as it counts them today.
 	MaxMembers int
 	// MaxDecodedBytes bounds what is decompressed to find where the
 	// members whose sizes follow their data end, all together: more is
@@ -82,8 +86,8 @@ type Recovery struct {
 // the members are found by their headers and a directory is made for
 // them; rec then says what was found. rec is nil for a sound archive.
 //
-// The errors are ErrNotZip (with archive/zip's reason), ErrNoMembers,
-// ErrBudget and ErrTooManyMembers.
+// The errors are ErrNotZip (archive/zip's error, which says why),
+// ErrNoMembers, ErrBudget and ErrTooManyMembers.
 func Open(r io.ReaderAt, size int64, lim Limits) (zr *zip.Reader, rec *Recovery, err error) {
 	zr, err = zip.NewReader(r, size)
 	if err == nil && !owns(r, zr) {
@@ -95,18 +99,23 @@ func Open(r io.ReaderAt, size int64, lim Limits) (zr *zip.Reader, rec *Recovery,
 	if err != nil {
 		var head [4]byte
 		if n, _ := r.ReadAt(head[:], 0); n != len(head) || binary.LittleEndian.Uint32(head[:]) != sigLocal {
-			return nil, nil, fmt.Errorf("%w: %v", ErrNotZip, err)
+			return nil, nil, notZip{err}
 		}
 		if zr, rec, err = Recover(r, size, lim); err != nil {
 			return nil, nil, err
 		}
 	}
-	if lim.MaxMembers > 0 && len(zr.File) > lim.MaxMembers {
-		return nil, nil, fmt.Errorf("%w: %d, limit %d", ErrTooManyMembers, len(zr.File), lim.MaxMembers)
-	}
 	zr.RegisterDecompressor(zip.Deflate, inflate.Decompressor)
 	return zr, rec, nil
 }
+
+// notZip is archive/zip's error for a file that is not a zip archive,
+// which also matches ErrNotZip.
+type notZip struct{ err error }
+
+func (e notZip) Error() string        { return e.err.Error() }
+func (e notZip) Unwrap() error        { return e.err }
+func (e notZip) Is(target error) bool { return target == ErrNotZip }
 
 var errNotItsOwn = errors.New("the directory found lists none of the archive's members")
 
