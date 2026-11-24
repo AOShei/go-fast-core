@@ -2,7 +2,7 @@
 
 The module version is the Go module's tag. The schema version is the `schema_version` every document carries; it changes only when a field is removed or its meaning changes (README, "Schema evolution").
 
-## Unreleased (schema 0.2)
+## v0.1.5 (schema 0.2)
 
 - **Package `inflate`: a shared decompressor**, about twice as fast as the standard library (3,770 MB/s against `compress/flate`'s 1,740 on the deflated members of 3,783 ODF files). go-fast-pdf's decompressor, moved here so that every library can use it: `Raw` for zip members, `Zlib` for PDF streams, `Gzip` for `.gz` files, each in one pass into a slice; `NewRawReader` and `NewGzipReader` for a member or file too large to hold whole (they hold 96 KiB); and `Decompressor`, to register on a `zip.Reader` for its deflated members. Each gives the standard library's bytes, also for a damaged stream, with errors that tell the kinds of damage apart, and bounds its output with a limit. An addition: nothing else in core changes, and it uses the standard library only.
 
