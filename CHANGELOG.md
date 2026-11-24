@@ -2,7 +2,7 @@
 
 The module version is the Go module's tag. The schema version is the `schema_version` every document carries; it changes only when a field is removed or its meaning changes (README, "Schema evolution").
 
-## Unreleased (schema 0.2)
+## v0.1.6 (schema 0.2)
 
 - **Package `ziprecover`: one way to open a zip archive, also one cut short**, for every library: `Open` gives a `*zip.Reader` with `inflate.Decompressor` registered. For an archive whose directory is lost, it finds the members by their own headers, makes a directory for them and returns a `Recovery`; `Recovery.Message` words the `input.repaired` warning. It is go-fast-ooxml's recovery, which go-fast-odf had copied, with two changes. A file cut short just after a zip stored in it was read as that stored zip, whose directory archive/zip finds at the file's end; it is now recovered. A stored member whose sizes follow its data (an EPUB's `mimetype`, as Go's zip writer makes it) ended the recovery; it now ends at its descriptor, found by its sizes and CRC-32. On 12,103 real files cut at 13 places each, it gives what that code gave in every other case, and opening them takes 31% less CPU. An addition, using the standard library and `inflate` only.
 - **`inflate.Reader.InputOffset`**: where the stream ended, once `Read` has returned `io.EOF`. Fuzzed against the bytes `compress/flate` reads.
