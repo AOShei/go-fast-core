@@ -519,3 +519,19 @@ func TestStoredFakeDescriptors(t *testing.T) {
 		t.Errorf("%+v, %v, %q", rec, err, got["fake.bin"].data)
 	}
 }
+
+// An archive whose names archive/zip calls insecure (with GODEBUG
+// zipinsecurepath=0) is read whole: names are the caller's to clean.
+func TestInsecurePath(t *testing.T) {
+	t.Setenv("GODEBUG", "zipinsecurepath=0")
+	data := archive(t, func(w *zip.Writer) {
+		raw(t, w, "../outside.txt", zip.Store, []byte("x"))
+	})
+	if _, err := zip.NewReader(bytes.NewReader(data), int64(len(data))); !errors.Is(err, zip.ErrInsecurePath) {
+		t.Skipf("archive/zip does not report insecure paths here: %v", err)
+	}
+	zr, rec, err := Open(bytes.NewReader(data), int64(len(data)), Limits{})
+	if err != nil || rec != nil || len(zr.File) != 1 || zr.File[0].Name != "../outside.txt" {
+		t.Errorf("%+v, %v", rec, err)
+	}
+}

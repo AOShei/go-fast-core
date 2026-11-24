@@ -91,6 +91,12 @@ type Recovery struct {
 // ErrNoMembers, ErrBudget and ErrTooManyMembers.
 func Open(r io.ReaderAt, size int64, lim Limits) (zr *zip.Reader, rec *Recovery, err error) {
 	zr, err = zip.NewReader(r, size)
+	if errors.Is(err, zip.ErrInsecurePath) && zr != nil {
+		// Read whole; a name that is not a local path (with GODEBUG
+		// zipinsecurepath=0) is the caller's to clean or refuse, as
+		// every library cleans names.
+		err = nil
+	}
 	if err == nil && !owns(r, zr) {
 		// The directory found is an archive's stored inside this one, cut
 		// short after it: archive/zip takes the last directory in the
