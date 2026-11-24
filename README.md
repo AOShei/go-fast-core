@@ -370,11 +370,31 @@ Package `inflate` (`github.com/AOShei/go-fast-core/inflate`) decompresses deflat
 | `Raw(dst, src, limit)` | a zip member (RFC 1951) | appended to `dst` in one pass |
 | `Zlib(dst, src, limit)` | a PDF stream (RFC 1950), Adler-32 checked | appended to `dst` in one pass |
 | `Gzip(dst, src, limit)` | a `.gz` file (RFC 1952), one member after another, CRC-32 and size checked | appended to `dst` in one pass |
-| `NewRawReader(src, limit)` | a member too large to hold whole | an `io.Reader`, holding 96 KiB; `Reset` reuses it |
+| `NewRawReader(src, limit)` | a member too large to hold whole | an `io.Reader`, holding 96 KiB; `Reset` reuses it; `InputOffset` is where the stream ended |
 | `NewGzipReader(src, limit)` | a `.gz` file too large to hold decompressed (a `.tar.gz`) | an `io.Reader`, as `NewRawReader` |
 | `Decompressor` | the deflated members of a `zip.Reader`: `zr.RegisterDecompressor(zip.Deflate, inflate.Decompressor)` | through a pooled `NewRawReader`; archive/zip checks the CRC-32 |
 
 Each gives the bytes the standard library gives, also for a damaged stream: what was decompressed before the damage, with an error that says which kind it is (`ErrHeader`, `ErrCorrupt`, `ErrShort`, `ErrChecksum`). `limit` bounds the output; past it the output is cut and the error is `ErrLimit`. The tests and fuzz targets compare each with `compress/flate`, `compress/zlib` and `compress/gzip`. Through `Decompressor`, a damaged member can keep up to 32 KiB more of its output before the error than with `compress/flate` (or at most 4 KiB less): archive/zip drops the read that ends a member short of its size or passes it, and the reads are cut differently.
+
+### Zip archives cut short
+
+Package `ziprecover` (`github.com/AOShei/go-fast-core/ziprecover`) opens a zip archive the same way for every library, including one cut short in transit (a stopped download, a crawl's size cap), which has lost the directory at its end. `Open(r, size, limits)` returns a `*zip.Reader` with `inflate.Decompressor` registered, or for a file that is not a zip, archive/zip's error (matching `ErrNotZip`). For a cut file it also returns a `*Recovery` saying what was found, and `Recovery.Message` gives the text of the `input.repaired` warning, worded the same in every library.
+
+- **How members are found.** Recovery runs only when the directory cannot be read and the file begins with a member's header. It reads the headers in order from the first byte and stops at the first offset that holds none. It never searches for things that look like headers, so a header inside a member's data (a zip stored in the archive) is never taken for a member.
+- **A member whose sizes follow its data** is decompressed to find where it ends, which also gives its size and CRC-32. Its directory entry is then written, and archive/zip checks every whole member's CRC-32 as usual.
+- **A stored member whose sizes follow its data** ends at the first descriptor after it that gives the length it would have there, is followed by a header, and holds the CRC-32 of the bytes before it. That cannot match by chance; go-fast-ooxml's code stopped at such a member, which Go's own zip writer makes (an EPUB's `mimetype`). If none is found, the member is taken as the one the file ends inside.
+- **The member the file ends inside** is kept. Reading it ends in an error after the text that is there. For a stored member cut inside its descriptor, that text includes what is there of the descriptor, at most 15 bytes.
+- **A zip stored inside a cut archive.** `archive/zip` alone would read that zip's directory as the file's own, so `Open` checks that the directory lists the member at the file's first byte, and recovers the file if it does not.
+- **Names** are the caller's to clean: an archive whose names archive/zip calls insecure (with `GODEBUG=zipinsecurepath=0`) is read whole, not recovered.
+- **Bounds:** `Limits.MaxMembers`, the members recovery finds (`ErrTooManyMembers`; a sound archive's members are the caller's to count), and `Limits.MaxDecodedBytes`, the decompression done to find member ends (`ErrBudget`). Files of 4 GiB or more are not recovered, as a directory of the plain kind cannot describe them.
+- **Speed and memory.** A file of up to 32 MiB is read into memory once to find member ends with `inflate`; a larger one is read from the file with `compress/flate`.
+
+It was go-fast-ooxml's recovery, which go-fast-odf had copied.
+- **Compared with that code** on 12,103 ODF, OOXML and EPUB files, each cut at 13 places (156,442 cuts), it finds the same members, sizes, CRC-32s and contents, with three exceptions:
+  - the 937 cuts that end just after a stored zip, which that code read as the stored zip;
+  - 6 cuts of a LibreOffice test file of stored members with descriptors (`dd-stored.docx`), where it reads 14 to 18 members, not 12;
+  - the size recorded for a member damaged inside its data, which is now the rest of the file. It reads to the same text and the same error.
+- **Speed:** opening those cuts takes 31% less CPU.
 
 ## Schema evolution
 
