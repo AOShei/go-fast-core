@@ -119,7 +119,7 @@ func TestCacheGrows(t *testing.T) {
 	}); n != 0 {
 		t.Errorf("%v allocations after the first sheet", n)
 	}
-	if NewCache(1<<40).max != 1<<20 {
+	if NewCache(math.MaxInt).max != 1<<20 {
 		t.Errorf("not bounded")
 	}
 }
