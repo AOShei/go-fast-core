@@ -396,6 +396,23 @@ It was go-fast-ooxml's recovery, which go-fast-odf had copied.
   - the size recorded for a member damaged inside its data, which is now the rest of the file. It reads to the same text and the same error.
 - **Speed:** opening those cuts takes 31% less CPU.
 
+### Number formats
+
+Package `numfmt` (`github.com/AOShei/go-fast-core/numfmt`) shows a spreadsheet cell's value the way the cell shows it: through its number format (`"#,##0.00"` writes 1234.5 as `1,234.50`, `"0.0%"` writes 0.125 as `12.5%`), with up to four sections for positive numbers, negative numbers, zero and text. go-fast-ooxml (xlsx, xlsb, SpreadsheetML 2003, chart data) and go-fast-msbin (xls, chart data) use it, so that the same cell shows the same text from every format. OpenDocument files store what a cell shows, so go-fast-odf needs none. It uses the standard library only.
+
+| | |
+|---|---|
+| `Parse(code)` | a format code, parsed; it does not fail: a code that cannot be understood gives General |
+| `General()`, `Builtin(id)` | the General format; the code of a built-in format by its number |
+| `Format.Number(dst, v, date1904)` | appends `v` as the format shows it, and a `Result`: `Shown`, `Blank` (the format shows nothing, so the value is written in full and the caller can say the cell hides it) or `Date` |
+| `Format.Text(dst, s)` | appends a cell's text as the format shows it |
+| `AppendGeneral(dst, v)` | appends `v` in General: its digits, up to the fifteen a spreadsheet keeps |
+| `Format.PlainText()`, `Format.IsDate()` | what the format is |
+
+Two things are not as displayed, on purpose. Dates and times are written in ISO 8601 whatever the format, since `03/04/2026` names two days depending on where the file was made. Padding (space the width of a digit, a character repeated to fill the cell) is written as one space, and space at the ends is removed. Numbers are rounded on their fifteen significant digits, half away from zero, as a spreadsheet does, so 0.1+0.2 shows as 0.3.
+
+The behaviour is held to what LibreOffice shows: `testdata/libreoffice.tsv` has 7,392 pairs of format and value with LibreOffice's text, and the tests check every one. go-fast-ooxml's `TestNumberFormatTable -update` writes the table, from a workbook LibreOffice shows. It was go-fast-ooxml's engine, which go-fast-msbin had copied, moved here unchanged.
+
 ## Schema evolution
 
 `schema_version` changes when a field is removed or its meaning changes. Additions do not change it, including new block kinds: a decoder that meets a kind, part kind, origin or severity it does not know maps it to that enum's `Unknown` value, and unknown style names are ignored. An unknown block renders as a paragraph. Re-encoding such a document writes `"unknown"`, so the original name is lost. `Validate` rejects `Unknown`, since extractors must never emit it.
