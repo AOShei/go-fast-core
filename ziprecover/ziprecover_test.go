@@ -101,6 +101,15 @@ func mixed(t testing.TB) ([]byte, []string, map[string]string) {
 	inner := archive(t, func(w *zip.Writer) {
 		raw(t, w, "inner.txt", zip.Store, []byte("an archive inside"))
 	})
+	// Stored with its length after it, and inside it, a descriptor whose
+	// sizes fit where it stands, followed by a header, but whose CRC-32
+	// is not that of the bytes before it.
+	fake := []byte("abc")
+	fake = binary.LittleEndian.AppendUint32(fake, sigDescriptor)
+	fake = binary.LittleEndian.AppendUint32(fake, 0xdeadbeef)
+	fake = binary.LittleEndian.AppendUint32(fake, 3)
+	fake = binary.LittleEndian.AppendUint32(fake, 3)
+	fake = append(fake, "PK\x03\x04 and more stored text"...)
 	rng := rand.New(rand.NewSource(1))
 	noise := make([]byte, 5000)
 	rng.Read(noise)
@@ -112,14 +121,18 @@ func mixed(t testing.TB) ([]byte, []string, map[string]string) {
 		"stored.bin": "stored as it is",
 		"inner.zip":  string(inner),
 		"c.xml":      "<c>" + long[:5000] + "</c>",
+		"mimetype":   "application/epub+zip",
+		"fake.bin":   string(fake),
 	}
-	order := []string{"a.xml", "b.txt", "empty.bin", "noise.bin", "stored.bin", "inner.zip", "c.xml"}
+	order := []string{"mimetype", "a.xml", "b.txt", "empty.bin", "noise.bin", "stored.bin", "fake.bin", "inner.zip", "c.xml"}
 	data := archive(t, func(w *zip.Writer) {
+		streamed(t, w, "mimetype", zip.Store, []byte(contents["mimetype"]))
 		streamed(t, w, "a.xml", zip.Deflate, []byte(contents["a.xml"]))
 		raw(t, w, "b.txt", zip.Deflate, []byte(contents["b.txt"]))
 		streamed(t, w, "empty.bin", zip.Deflate, nil)
 		streamed(t, w, "noise.bin", zip.Deflate, noise)
 		raw(t, w, "stored.bin", zip.Store, []byte(contents["stored.bin"]))
+		streamed(t, w, "fake.bin", zip.Store, fake)
 		raw(t, w, "inner.zip", zip.Store, inner)
 		streamed(t, w, "c.xml", zip.Deflate, []byte(contents["c.xml"]))
 	})
@@ -202,15 +215,34 @@ func TestRecoverFindsMembers(t *testing.T) {
 	if rec2, got2, _, err := bothWays(t, plain, Limits{}); err != nil || rec2.Members != len(order) || fmt.Sprint(got2) != fmt.Sprint(got) {
 		t.Errorf("descriptors without signatures: %+v, %v", rec2, err)
 	}
-	// A member stored as it is, with its length after it, cannot be told
-	// from what follows: the members before it are found.
+	// A member stored as it is, with its length after it, ends at its
+	// descriptor; one whose descriptor is damaged is taken as cut.
 	stored := archive(t, func(w *zip.Writer) {
 		streamed(t, w, "a.xml", zip.Deflate, []byte(long))
 		streamed(t, w, "s.bin", zip.Store, []byte("stored"))
 		streamed(t, w, "c.xml", zip.Deflate, []byte(long))
 	})
-	if rec, _, _, err := bothWays(t, stored[:directoryAt(t, stored)], Limits{}); err != nil || rec.Members != 1 || rec.Cut != "" {
+	cut = stored[:directoryAt(t, stored)]
+	if rec, got, _, err := bothWays(t, cut, Limits{}); err != nil || rec.Members != 3 || rec.Cut != "" || got["s.bin"].data != "stored" || got["s.bin"].err != nil {
 		t.Errorf("a stored member with its length after it: %+v, %v", rec, err)
+	}
+	// Its descriptor where one read of the file ends and the next
+	// begins.
+	for _, n := range []int{64<<10 - 20, 64<<10 - 8, 64<<10 - 1, 64 << 10, 64<<10 + 3} {
+		body := bytes.Repeat([]byte{'s'}, n)
+		edge := archive(t, func(w *zip.Writer) {
+			streamed(t, w, "e.bin", zip.Store, body)
+			streamed(t, w, "after", zip.Deflate, []byte("after"))
+		})
+		if rec, got, _, err := bothWays(t, edge[:directoryAt(t, edge)], Limits{}); err != nil || rec.Members != 2 || got["e.bin"].data != string(body) || got["after"].data != "after" {
+			t.Errorf("a stored member of %d bytes: %+v, %v", n, rec, err)
+		}
+	}
+	at := bytes.Index(cut, []byte("storedPK\x07\x08")) + len("stored") + 4
+	damaged := append([]byte(nil), cut...)
+	damaged[at] ^= 1 // its CRC-32
+	if rec, got, _, err := bothWays(t, damaged, Limits{}); err != nil || rec.Members != 2 || rec.Cut != "s.bin" || got["s.bin"].err == nil || !strings.HasPrefix(got["s.bin"].data, "stored") {
+		t.Errorf("a stored member whose descriptor is damaged: %+v, %v, %v", rec, got["s.bin"], err)
 	}
 }
 
@@ -276,7 +308,7 @@ func TestCutAnywhere(t *testing.T) {
 			switch {
 			case whole && (m.err != nil || m.data != contents[name]):
 				t.Fatalf("cut at %d: %s, before the cut, reads as %d bytes of %d, %v", cut, name, len(m.data), len(contents[name]), m.err)
-			case !whole && (rec.Cut != name || m.err == nil || !strings.HasPrefix(contents[name], m.data)):
+			case !whole && (rec.Cut != name || m.err == nil || !cutReads(contents[name], m.data)):
 				t.Fatalf("cut at %d: %s, cut, reads as %d bytes, %v (cut %q)", cut, name, len(m.data), m.err, rec.Cut)
 			}
 		}
@@ -287,7 +319,7 @@ func TestCutAnywhere(t *testing.T) {
 		}
 	}
 	// Only a cut before the first member's data is refused.
-	if refused != 30+len("a.xml")+1 {
+	if refused != 30+len("mimetype")+1 {
 		t.Errorf("%d cuts refused", refused)
 	}
 }
@@ -325,6 +357,15 @@ func TestRecoveryIsBounded(t *testing.T) {
 	}
 	if _, rec, err := Open(bytes.NewReader(cut), int64(len(cut)), Limits{MaxDecodedBytes: 1200 << 10}); err != nil || rec.Members != 2 {
 		t.Errorf("two members within the budget: %+v, %v", rec, err)
+	}
+	// Stored members are checksummed to find their ends, which the budget
+	// bounds too.
+	big := archive(t, func(w *zip.Writer) {
+		streamed(t, w, "s.bin", zip.Store, make([]byte, 2<<20))
+	})
+	cut = big[:directoryAt(t, big)]
+	if _, _, err := Open(bytes.NewReader(cut), int64(len(cut)), Limits{MaxDecodedBytes: 1 << 20}); !errors.Is(err, ErrBudget) {
+		t.Errorf("a stored member over the budget: %v", err)
 	}
 	many := archive(t, func(w *zip.Writer) {
 		for i := range 50 {
@@ -423,10 +464,10 @@ func TestStoredArchiveBeforeTheCut(t *testing.T) {
 		t.Fatalf("archive/zip does not read the stored zip's directory: %v", err)
 	}
 	rec, got, _, err := bothWays(t, cut, Limits{})
-	if err != nil || rec == nil || rec.Members != 6 || rec.Cut != "" || len(got) != 6 {
+	if err != nil || rec == nil || rec.Members != 8 || rec.Cut != "" || len(got) != 8 {
 		t.Fatalf("%+v, %v, %d members", rec, err, len(got))
 	}
-	for _, name := range order[:6] {
+	for _, name := range order[:8] {
 		if m := got[name]; m.err != nil {
 			t.Errorf("%s: %v", name, m.err)
 		}
@@ -436,5 +477,45 @@ func TestStoredArchiveBeforeTheCut(t *testing.T) {
 	front := append([]byte("MZ a program first "), data...)
 	if zr, rec, err := Open(bytes.NewReader(front), int64(len(front)), Limits{}); err != nil || rec != nil || len(zr.File) != len(order) {
 		t.Errorf("an archive after other data: %+v, %v", rec, err)
+	}
+}
+
+// cutReads reports whether a member cut short read as it may: a prefix of
+// its content, or, for a stored member cut inside its descriptor, its
+// content and what is there of the descriptor, which nothing tells from
+// its data.
+func cutReads(content, read string) bool {
+	return strings.HasPrefix(content, read) || strings.HasPrefix(read, content) && len(read)-len(content) < 16
+}
+
+// Inside a stored member whose sizes follow it, descriptors that fit in
+// every way but one are not taken for its end. (One that fits in every
+// way, sizes and CRC-32, and ends where the file is cut, cannot be told
+// from the member's own; it does not occur by chance.)
+func TestStoredFakeDescriptors(t *testing.T) {
+	fake := []byte("abc")
+	// One whose sizes and CRC-32 fit, but no header follows it.
+	k := len(fake)
+	sum := crc32.ChecksumIEEE(fake)
+	fake = binary.LittleEndian.AppendUint32(fake, sigDescriptor)
+	fake = binary.LittleEndian.AppendUint32(fake, sum)
+	fake = binary.LittleEndian.AppendUint32(fake, uint32(k))
+	fake = binary.LittleEndian.AppendUint32(fake, uint32(k))
+	fake = append(fake, " no header here"...)
+	// One whose CRC-32 fits and a header follows, but whose sizes differ.
+	k = len(fake)
+	sum = crc32.ChecksumIEEE(fake)
+	fake = binary.LittleEndian.AppendUint32(fake, sigDescriptor)
+	fake = binary.LittleEndian.AppendUint32(fake, sum)
+	fake = binary.LittleEndian.AppendUint32(fake, uint32(k))
+	fake = binary.LittleEndian.AppendUint32(fake, uint32(k+1))
+	fake = append(fake, "PK\x03\x04 the end"...)
+	data := archive(t, func(w *zip.Writer) {
+		streamed(t, w, "fake.bin", zip.Store, fake)
+		streamed(t, w, "after", zip.Deflate, []byte("after"))
+	})
+	rec, got, _, err := bothWays(t, data[:directoryAt(t, data)], Limits{})
+	if err != nil || rec.Members != 2 || got["fake.bin"].data != string(fake) || got["after"].data != "after" {
+		t.Errorf("%+v, %v, %q", rec, err, got["fake.bin"].data)
 	}
 }

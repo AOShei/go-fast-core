@@ -23,6 +23,7 @@ package ziprecover
 
 import (
 	"archive/zip"
+	"bytes"
 	"compress/flate"
 	"encoding/binary"
 	"errors"
@@ -262,8 +263,28 @@ scan:
 			if next = data + int64(m.compressed); next > size {
 				whole, m.compressed = false, uint32(size-data)
 			}
+		case m.method == zip.Store:
+			// Stored, with its length after it: it ends at the first
+			// descriptor that gives the length it would have there and
+			// the CRC-32 of the bytes before it.
+			n, sum, after, spent, ok, err := e.storedEnd(data, budget)
+			budget -= spent
+			if err != nil {
+				return nil, nil, err
+			}
+			if ok {
+				m.compressed, m.actual, m.crc = uint32(n), uint32(n), sum
+				next = after
+			} else {
+				// None: the file ends inside it, or its descriptor is
+				// damaged. It is all that is there. Its size is given as
+				// a byte more, so that reading it reports it cut after
+				// its bytes: archive/zip checks no CRC-32 of 0.
+				whole = false
+				m.compressed, m.actual, m.crc = uint32(size-data), uint32(size-data)+1, 0
+			}
 		case m.method != zip.Deflate:
-			break scan // stored, with its length after it: nothing says where it ends
+			break scan // another method, with its length after it: not something to decompress here
 		default:
 			// The length follows the data. Where the data ends is found
 			// by decompressing it, which also gives the length and the
@@ -392,6 +413,78 @@ func (e *ender) end(data, budget int64) (used, n int64, sum uint32, err error) {
 			return 0, n, 0, rerr
 		}
 	}
+}
+
+// storedEnd finds where a stored member whose sizes follow its data
+// ends: at the first descriptor after data, with its signature or
+// without, whose two sizes are the distance from data, which is followed
+// by the file's end or a header, and whose CRC-32 is that of the bytes
+// before it. It returns the data's length and CRC-32, where the next
+// member begins, the bytes it checksummed (charged to budget), and
+// whether one was found. The sizes and the CRC-32 together cannot match
+// by chance.
+func (e *ender) storedEnd(data, budget int64) (n int64, sum uint32, after, spent int64, ok bool, err error) {
+	const chunk = 64 << 10
+	buf := make([]byte, chunk+16)
+	var tail [4]byte
+	for base := data; base < e.size || base == data; base += chunk {
+		got, _ := e.r.ReadAt(buf[:min(int64(len(buf)), e.size-base)], base)
+		b := buf[:got]
+		for i := 0; i < chunk && i < len(b); i++ {
+			k := base + int64(i) - data
+			if k >= 1<<32-1 {
+				return 0, 0, 0, spent, false, nil
+			}
+			var crc uint32
+			var end int64
+			switch rest := b[i:]; {
+			case len(rest) >= 16 && binary.LittleEndian.Uint32(rest) == sigDescriptor &&
+				int64(binary.LittleEndian.Uint32(rest[8:])) == k && int64(binary.LittleEndian.Uint32(rest[12:])) == k:
+				crc, end = binary.LittleEndian.Uint32(rest[4:]), base+int64(i)+16
+			case len(rest) >= 12 && int64(binary.LittleEndian.Uint32(rest[4:])) == k && int64(binary.LittleEndian.Uint32(rest[8:])) == k:
+				crc, end = binary.LittleEndian.Uint32(rest), base+int64(i)+12
+			default:
+				continue
+			}
+			if end != e.size {
+				// A header follows, or as much of one as the file holds.
+				k := min(e.size-end, 4)
+				if _, err := e.r.ReadAt(tail[:k], end); err != nil {
+					continue
+				}
+				if !headerStart(tail[:k]) {
+					continue
+				}
+			}
+			if spent += k; spent > budget {
+				return 0, 0, 0, spent, false, ErrBudget
+			}
+			h := crc32.NewIEEE()
+			if _, err := io.Copy(h, io.NewSectionReader(e.r, data, k)); err != nil {
+				continue
+			}
+			if h.Sum32() == crc {
+				return k, crc, end, spent, true, nil
+			}
+		}
+		if base+chunk >= e.size {
+			break
+		}
+	}
+	return 0, 0, 0, spent, false, nil
+}
+
+// headerStart reports whether b is the signature of a member's header, a
+// directory entry or the end record, or as much of one as b holds.
+func headerStart(b []byte) bool {
+	for _, sig := range []uint32{sigLocal, sigDirectory, sigEnd} {
+		var want [4]byte
+		binary.LittleEndian.PutUint32(want[:], sig)
+		if bytes.HasPrefix(want[:], b) {
+			return true
+		}
+	}
+	return false
 }
 
 // descriptorEnd returns where the next member begins after data that
