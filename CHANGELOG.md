@@ -2,7 +2,7 @@
 
 The module version is the Go module's tag. The schema version is the `schema_version` every document carries; it changes only when a field is removed or its meaning changes (README, "Schema evolution").
 
-## [Unreleased]
+## v0.1.7 (schema 0.2)
 
 - **Package `numfmt`: a cell's value through its number format**, the engine go-fast-ooxml wrote and go-fast-msbin copied, moved here unchanged so that both use one: `Parse`, `General`, `Builtin`, `AppendGeneral`, `Format.Number`, `Format.Text`, `Format.PlainText`, `Format.IsDate`, `Result`. Its tests come with it, with the table of 7,392 formats and values that LibreOffice showed. The code is go-fast-ooxml v0.5.0's byte for byte, but for one comment naming the table's new place. An addition, using the standard library only.
 
