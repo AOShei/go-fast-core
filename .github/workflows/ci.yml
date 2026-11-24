@@ -52,10 +52,42 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: GOARCH=386 go test -short ./...
 
-      - name: Fuzz smoke
-        if: matrix.os == 'ubuntu-latest' && matrix.go == 'stable'
+  fuzz:
+    # Every fuzz target, 20 s each, one job per target so that they run
+    # side by side with the tests. inflate and ziprecover read untrusted
+    # input for every library in the series; numfmt shows every cell.
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - . FuzzDocumentJSON
+          - ./numfmt FuzzNumFmt
+          - ./ziprecover FuzzRecover
+          - ./inflate FuzzZlib
+          - ./inflate FuzzRaw
+          - ./inflate FuzzGzip
+          - ./inflate FuzzAdler32
+          - ./inflate FuzzRawReader
+          - ./inflate FuzzReaderInputOffset
+          - ./inflate FuzzGzipReader
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Fuzz
         run: |
-          go test -run '^$' -fuzz '^FuzzDocumentJSON$' -fuzztime 20s -fuzzminimizetime 0s .
+          set -- ${{ matrix.target }}
+          go test -run '^$' -fuzz "^$2\$" -fuzztime 20s -fuzzminimizetime 0s "$1"
+
+      # A new fuzz target must be added above: this fails when one is not.
+      - name: Every target listed
+        if: matrix.target == '. FuzzDocumentJSON'
+        run: |
+          listed=$(grep -E '^ +- [./a-z]+ Fuzz[A-Za-z0-9]+$' .github/workflows/ci.yml | awk '{print $3}' | sort -u)
+          found=$(grep -rhoE '^func Fuzz[A-Za-z0-9]+' --include='*_test.go' . | sed 's/^func //' | sort -u)
+          if [ "$listed" != "$found" ]; then echo "fuzz targets in the code and in ci.yml differ:"; diff <(echo "$listed") <(echo "$found"); exit 1; fi
 
   dependencies:
     # The series rule: the standard library and go-fast modules only.
