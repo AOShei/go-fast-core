@@ -73,8 +73,7 @@ func (g *GzipReader) Read(p []byte) (int, error) {
 		}
 		// The member's stream is done: its trailer follows the last byte
 		// of its last block.
-		d := g.z.d
-		after := g.pos + d.pos - int(d.n>>3)
+		after := g.pos + int(g.z.InputOffset())
 		g.in = false
 		switch {
 		case after+8 > len(g.src):

@@ -241,3 +241,84 @@ func BenchmarkRawReader(b *testing.B) {
 		})
 	}
 }
+
+// countingSource gives compress/flate its input a byte at a time, so that
+// it takes not a byte past the end of the stream, and counts the bytes.
+type countingSource struct {
+	src []byte
+	n   int
+}
+
+func (c *countingSource) ReadByte() (byte, error) {
+	if c.n == len(c.src) {
+		return 0, io.EOF
+	}
+	c.n++
+	return c.src[c.n-1], nil
+}
+
+func (c *countingSource) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	b, err := c.ReadByte()
+	if err != nil {
+		return 0, err
+	}
+	p[0] = b
+	return 1, nil
+}
+
+// endsAt checks that where z says the stream src ended is where
+// compress/flate ends it, for a stream both read whole.
+func endsAt(t testing.TB, z *Reader, src []byte) {
+	t.Helper()
+	z.Reset(src, 1<<30)
+	_, err := io.Copy(io.Discard, z)
+	c := &countingSource{src: src}
+	_, ferr := io.Copy(io.Discard, flate.NewReader(c))
+	if (err == nil) != (ferr == nil) {
+		t.Fatalf("Reader %v, compress/flate %v\ninput %x", err, ferr, clip(src))
+	}
+	if err == nil && z.InputOffset() != int64(c.n) {
+		t.Fatalf("the stream ends at %d, compress/flate says %d\ninput %x", z.InputOffset(), c.n, clip(src))
+	}
+}
+
+// InputOffset is where the stream ends, whatever follows it.
+func TestReaderInputOffset(t *testing.T) {
+	z := NewRawReader(nil, 0)
+	data := samples()
+	data["large"] = large()[:200000]
+	for name, d := range data {
+		for _, level := range levels {
+			src := compressed(t, rawFormat, d, level)
+			for _, after := range [][]byte{nil, {0}, []byte("PK\x07\x08 and what follows"), bytes.Repeat([]byte{0xff}, 100)} {
+				in := append(append([]byte(nil), src...), after...)
+				z.Reset(in, 1<<30)
+				if _, err := io.Copy(io.Discard, z); err != nil {
+					t.Fatalf("%s at level %d: %v", name, level, err)
+				}
+				if got := z.InputOffset(); got != int64(len(src)) {
+					t.Fatalf("%s at level %d, %d bytes after: ends at %d, want %d", name, level, len(after), got, len(src))
+				}
+				endsAt(t, z, in)
+			}
+		}
+	}
+}
+
+func FuzzReaderInputOffset(f *testing.F) {
+	for _, d := range samples() {
+		if len(d) > 2000 {
+			d = d[:2000]
+		}
+		for _, level := range levels {
+			f.Add(append(compressed(f, rawFormat, d, level), "PK\x03\x04"...))
+		}
+	}
+	z := NewRawReader(nil, 0)
+	f.Fuzz(func(t *testing.T, src []byte) {
+		endsAt(t, z, src)
+	})
+}

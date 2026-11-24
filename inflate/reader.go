@@ -82,3 +82,11 @@ func (z *Reader) Read(p []byte) (int, error) {
 		}
 	}
 }
+
+// InputOffset returns how many bytes of src the stream has taken. Once
+// Read has returned io.EOF it is where the stream ended: the byte after
+// its last block, as bytes after it are not read. Before that, or after
+// an error, it is how far decoding has read.
+func (z *Reader) InputOffset() int64 {
+	return int64(z.d.pos - int(z.d.n>>3))
+}

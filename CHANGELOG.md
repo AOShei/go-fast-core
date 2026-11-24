@@ -2,6 +2,11 @@
 
 The module version is the Go module's tag. The schema version is the `schema_version` every document carries; it changes only when a field is removed or its meaning changes (README, "Schema evolution").
 
+## Unreleased (schema 0.2)
+
+- **Package `ziprecover`: one way to open a zip archive, also one cut short**, for every library: `Open` gives a `*zip.Reader` with `inflate.Decompressor` registered. For an archive whose directory is lost, it finds the members by their own headers, makes a directory for them and returns a `Recovery`; `Recovery.Message` words the `input.repaired` warning. It is go-fast-ooxml's recovery, which go-fast-odf had copied, with one fix: a file cut short just after a zip stored in it was read as that stored zip, whose directory archive/zip finds at the file's end. On 12,103 real files cut at 13 places each, it gives what that code gave in every other case, and opening them takes 31% less CPU. An addition, using the standard library and `inflate` only.
+- **`inflate.Reader.InputOffset`**: where the stream ended, once `Read` has returned `io.EOF`. Fuzzed against the bytes `compress/flate` reads.
+
 ## v0.1.5 (schema 0.2)
 
 - **Package `inflate`: a shared decompressor**, about twice as fast as the standard library (3,770 MB/s against `compress/flate`'s 1,740 on the deflated members of 3,783 ODF files). go-fast-pdf's decompressor, moved here so that every library can use it: `Raw` for zip members, `Zlib` for PDF streams, `Gzip` for `.gz` files, each in one pass into a slice; `NewRawReader` and `NewGzipReader` for a member or file too large to hold whole (they hold 96 KiB); and `Decompressor`, to register on a `zip.Reader` for its deflated members. Each gives the standard library's bytes, also for a damaged stream, with errors that tell the kinds of damage apart, and bounds its output with a limit. An addition: nothing else in core changes, and it uses the standard library only.
