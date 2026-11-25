@@ -8,7 +8,7 @@ Every extractor (`go-fast-pdf`, `go-fast-ooxml`, `go-fast-odf`, `go-fast-html`, 
 import "github.com/AOShei/go-fast-core" // package gofastcore
 ```
 
-**Status: module v0.1.8, schema version 0.2.** The module version is the Go module's tag; the schema version is the `schema_version` in every document and changes only as [Schema evolution](#schema-evolution) says. Schema 0.1 was agreed with the PDF extractor over two review rounds on 2026-11-18. Schema 0.2 (2026-11-20) replaced the hidden-text verdicts with what a file declares about display; see [What the file declares](#what-the-file-declares). Changes are in [CHANGELOG.md](CHANGELOG.md).
+**Status: module v0.1.9, schema version 0.2.** The module version is the Go module's tag; the schema version is the `schema_version` in every document and changes only as [Schema evolution](#schema-evolution) says. Schema 0.1 was agreed with the PDF extractor over two review rounds on 2026-11-18. Schema 0.2 (2026-11-20) replaced the hidden-text verdicts with what a file declares about display; see [What the file declares](#what-the-file-declares). Changes are in [CHANGELOG.md](CHANGELOG.md).
 
 ## Series conventions
 
@@ -415,7 +415,7 @@ Two things are not as displayed, on purpose. Dates and times are written in ISO 
 The behaviour is held to what LibreOffice shows: `testdata/libreoffice.tsv` has 7,392 pairs of format and value with LibreOffice's text, and the tests check every one. go-fast-ooxml's `TestNumberFormatTable -update` writes the table, from a workbook LibreOffice shows. It was go-fast-ooxml's engine, which go-fast-msbin had copied, moved here unchanged.
 
 **A cache, for a sheet's repeated values.** A column often holds the same amount, date or code many times. `Cache.Number(f, dst, v, date1904)` gives what `f.Number(dst, v, date1904)` gives, always, and copies the text when the same format, value and date system came recently. The key is the `*Format`, so the formats must be parsed once per workbook, not once per cell.
-- **Size.** `NewCache(entries)` takes the most entries the table may grow to, rounded down to a power of two, at most 2^20. Under one gives the nil `*Cache`, which remembers nothing and is `Format.Number`. The table starts at 64 entries and doubles, keeping its entries, each time it has missed as many values as it has entries. An entry is 24 bytes, plus its text in a buffer bounded at 64 bytes an entry. A full table of 4,096 entries holds about 368 KB.
+- **Size.** `NewCache(entries)` takes the most entries the table may grow to, rounded down to a power of two, at most 2^20. Under one gives the nil `*Cache`, which remembers nothing and is `Format.Number`; so does a `Cache` not made by `NewCache`. The table starts at 64 entries and doubles, keeping its entries, each time it has missed as many values as it has entries. An entry is 24 bytes, plus its text in a buffer bounded at 64 bytes an entry. A full table of 4,096 entries holds about 368 KB.
 - **One per sheet reader.** A `Cache` is not safe for concurrent use. `Reset` empties it when a sheet begins and keeps its memory; a reader that makes a new sheet reader for each sheet can keep its caches in a `sync.Pool` between sheets.
 - **The size is the library's choice**, a trade of memory for speed measured in each library. A cache too small for a sheet's distinct values can cost more than it saves. go-fast-msbin measured its 1,111-workbook batch 7.9% faster with 4,096 entries (all workers), go-fast-ooxml its Common Crawl batch 1.6% faster with 256 (one worker), with the output unchanged.
 
