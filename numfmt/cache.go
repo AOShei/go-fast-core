@@ -26,7 +26,7 @@ var lastID atomic.Uint64
 // limit NewCache is given. Each entry is 24 bytes, plus its text in a
 // buffer bounded at 64 bytes an entry; when the buffer is full the table
 // is emptied. The nil *Cache remembers nothing: its Number is
-// Format.Number.
+// Format.Number. So does a Cache not made by NewCache, the zero value.
 //
 // A reader that makes a new sheet reader for each sheet can keep its
 // Caches between sheets (in a sync.Pool, say) and Reset them, so that a
@@ -71,7 +71,7 @@ func NewCache(entries int) *Cache {
 // Number appends v as f displays it, as f.Number does, remembering the
 // text for the next time v is shown through f.
 func (c *Cache) Number(f *Format, dst []byte, v float64, date1904 bool) ([]byte, Result) {
-	if c == nil {
+	if c == nil || c.max == 0 {
 		return f.Number(dst, v, date1904)
 	}
 	if c.slots == nil {
