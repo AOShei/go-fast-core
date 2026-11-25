@@ -124,6 +124,60 @@ func TestCacheGrows(t *testing.T) {
 	}
 }
 
+// TestCacheKeeps: growing keeps every entry, each where index puts it,
+// and Reset leaves no Format in the table's memory, also past its first
+// entries.
+func TestCacheKeeps(t *testing.T) {
+	f, g := Parse("0.00"), Parse("yyyy-mm-dd")
+	c := NewCache(1 << 12)
+	held := func() map[slot]bool {
+		m := map[slot]bool{}
+		for i, s := range c.slots {
+			if s.f == nil {
+				continue
+			}
+			if c.index(s.f, s.bits, s.d1904) != uint64(i) {
+				t.Fatalf("entry %d is in the wrong place", i)
+			}
+			m[s] = true
+		}
+		return m
+	}
+	var out []byte
+	for i := 0; len(c.slots) < 1<<12; i++ {
+		before, n := held(), len(c.slots)
+		fm := f
+		if i%3 == 0 {
+			fm = g
+		}
+		out, _ = c.Number(fm, out[:0], float64(i), i%5 == 0)
+		if len(c.slots) == n {
+			continue
+		}
+		// The value that grew the table is stored after the move, and
+		// may take its own place from another entry.
+		after, at := held(), c.index(fm, math.Float64bits(float64(i)), i%5 == 0)
+		lost := 0
+		for s := range before {
+			if !after[s] {
+				if c.index(s.f, s.bits, s.d1904) != at {
+					t.Fatalf("growing to %d lost an entry", len(c.slots))
+				}
+				lost++
+			}
+		}
+		if len(after) != len(before)+1-lost {
+			t.Fatalf("growing to %d: %d entries, had %d", len(c.slots), len(after), len(before))
+		}
+	}
+	c.Reset()
+	for i, s := range c.slots[:cap(c.slots)] {
+		if s.f != nil {
+			t.Fatalf("after Reset, entry %d holds a format", i)
+		}
+	}
+}
+
 // TestCacheNil: no cache, or a size under one, is Format.Number.
 func TestCacheNil(t *testing.T) {
 	for _, c := range []*Cache{nil, NewCache(0), NewCache(-5)} {

@@ -21,11 +21,16 @@ var lastID atomic.Uint64
 // Reset it when a sheet begins: a sheet's values rarely recur in the
 // next, and a small sheet then costs a small table.
 //
-// The table starts at 64 entries and doubles, emptied, each time it
-// has missed as many values as it has entries, up to the limit NewCache
-// is given. Each entry is 24 bytes, plus its text in a buffer that is
-// emptied with the table and bounded at 64 bytes an entry. The nil
-// *Cache remembers nothing: its Number is Format.Number.
+// The table starts at 64 entries and doubles, keeping what it holds,
+// each time it has missed as many values as it has entries, up to the
+// limit NewCache is given. Each entry is 24 bytes, plus its text in a
+// buffer bounded at 64 bytes an entry; when the buffer is full the table
+// is emptied. The nil *Cache remembers nothing: its Number is
+// Format.Number.
+//
+// A reader that makes a new sheet reader for each sheet can keep its
+// Caches between sheets (in a sync.Pool, say) and Reset them, so that a
+// sheet does not allocate a table of its own.
 type Cache struct {
 	slots  []slot
 	shift  uint // 64 minus log2(len(slots))
@@ -73,11 +78,7 @@ func (c *Cache) Number(f *Format, dst []byte, v float64, date1904 bool) ([]byte,
 		c.resize(min(firstSlots, c.max))
 	}
 	bits := math.Float64bits(v)
-	h := bits + f.id*0x9E3779B97F4A7C15
-	if date1904 {
-		h ^= 0xD6E8FEB86659FD93
-	}
-	s := &c.slots[(h*0xBF58476D1CE4E5B9)>>c.shift]
+	s := &c.slots[c.index(f, bits, date1904)]
 	if s.f == f && s.bits == bits && s.d1904 == date1904 {
 		return append(dst, c.text[s.off:s.off+uint32(s.n)]...), s.result
 	}
@@ -89,8 +90,8 @@ func (c *Cache) Number(f *Format, dst []byte, v float64, date1904 bool) ([]byte,
 	}
 	c.misses++
 	if c.misses > len(c.slots) && len(c.slots) < c.max {
-		c.resize(2 * len(c.slots))
-		s = &c.slots[(h*0xBF58476D1CE4E5B9)>>c.shift]
+		c.grow()
+		s = &c.slots[c.index(f, bits, date1904)]
 	} else if len(c.text)+len(out) > slotText*len(c.slots) {
 		c.empty()
 	}
@@ -99,7 +100,18 @@ func (c *Cache) Number(f *Format, dst []byte, v float64, date1904 bool) ([]byte,
 	return dst, result
 }
 
+// index is the entry the key falls in.
+func (c *Cache) index(f *Format, bits uint64, date1904 bool) uint64 {
+	h := bits + f.id*0x9E3779B97F4A7C15
+	if date1904 {
+		h ^= 0xD6E8FEB86659FD93
+	}
+	return (h * 0xBF58476D1CE4E5B9) >> c.shift
+}
+
 // Reset empties c and returns it to its first size, keeping its memory.
+// The whole table is emptied, so that it holds no Format of the sheets
+// before.
 func (c *Cache) Reset() {
 	if c == nil || c.slots == nil {
 		return
@@ -108,7 +120,10 @@ func (c *Cache) Reset() {
 }
 
 // resize makes the table n entries, a power of two, and empties it.
+// The entries past the table, up to its capacity, are always empty:
+// resize and grow leave them so.
 func (c *Cache) resize(n int) {
+	c.empty()
 	if cap(c.slots) >= n {
 		c.slots = c.slots[:n]
 	} else {
@@ -118,7 +133,30 @@ func (c *Cache) resize(n int) {
 	for m := n; m > 1; m /= 2 {
 		c.shift--
 	}
-	c.empty()
+}
+
+// grow doubles the table, keeping its entries and their texts. An index
+// is the top bits of the key's hash, so the entry at i moves to 2i or
+// 2i+1, and none moves onto another: they are moved from the last, each
+// to a place already moved from or new.
+func (c *Cache) grow() {
+	n := len(c.slots)
+	if cap(c.slots) >= 2*n {
+		c.slots = c.slots[:2*n]
+	} else {
+		s := make([]slot, 2*n)
+		copy(s, c.slots)
+		c.slots = s
+	}
+	c.shift--
+	for i := n - 1; i >= 0; i-- {
+		s := c.slots[i]
+		c.slots[i] = slot{}
+		if s.f != nil {
+			c.slots[c.index(s.f, s.bits, s.d1904)] = s
+		}
+	}
+	c.misses = 0
 }
 
 // empty forgets every entry.
