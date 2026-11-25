@@ -62,6 +62,7 @@ jobs:
         target:
           - . FuzzDocumentJSON
           - ./numfmt FuzzNumFmt
+          - ./numfmt FuzzCache
           - ./ziprecover FuzzRecover
           - ./inflate FuzzZlib
           - ./inflate FuzzRaw

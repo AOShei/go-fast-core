@@ -2,6 +2,11 @@
 
 The module version is the Go module's tag. The schema version is the `schema_version` every document carries; it changes only when a field is removed or its meaning changes (README, "Schema evolution").
 
+## v0.1.8 (schema 0.2)
+
+- **`numfmt.Cache`: what `Format.Number` made of recent values, for a sheet's repeated values.** `NewCache(entries)`, `Cache.Number(f, dst, v, date1904)` and `Cache.Reset()`. A direct-mapped table keyed by the `*Format`, the value's bits and the date system, which starts at 64 entries and doubles, keeping its entries, up to the size given; `Reset` empties all of it and keeps its memory. `Cache.Number` gives `Format.Number`'s bytes and `Result` always: a test over the LibreOffice table at sizes from 1 to 65,536, and the fuzz target `FuzzCache`, now in CI, hold it. The nil `*Cache` is `Format.Number`. Measured in the libraries before release, with their output unchanged: go-fast-msbin's batch of 1,111 workbooks 7.9% faster at 4,096 entries with all workers, go-fast-ooxml's Common Crawl batch 1.6% faster at 256 with one worker. Each library sets its own size. An addition, using the standard library only.
+- **CI fuzzes every target**, 20 s each, in a job of its own, and fails if a `Fuzz` function is not in its list.
+
 ## v0.1.7 (schema 0.2)
 
 - **Package `numfmt`: a cell's value through its number format**, the engine go-fast-ooxml wrote and go-fast-msbin copied, moved here unchanged so that both use one: `Parse`, `General`, `Builtin`, `AppendGeneral`, `Format.Number`, `Format.Text`, `Format.PlainText`, `Format.IsDate`, `Result`. Its tests come with it, with the table of 7,392 formats and values that LibreOffice showed. The code is go-fast-ooxml v0.5.0's byte for byte, but for one comment naming the table's new place. An addition, using the standard library only.

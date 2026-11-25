@@ -38,6 +38,7 @@ type Format struct {
 	sections []section // for numbers: one to three
 	text     *section  // for text: the fourth section, or the only one if it shows text
 	conds    bool      // some section has a condition written in the code
+	id       uint64    // for Cache's hash: 0 for General, else from Parse
 }
 
 type kind uint8
@@ -143,7 +144,7 @@ func Parse(code string) *Format {
 	if len(parts) > 4 {
 		parts = parts[:4]
 	}
-	f := &Format{}
+	f := &Format{id: lastID.Add(1)}
 	for i, p := range parts {
 		s, ok := parseSection(p)
 		if !ok {
