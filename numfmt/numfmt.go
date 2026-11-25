@@ -23,6 +23,7 @@
 package numfmt
 
 import (
+	"bytes"
 	"math"
 	"strconv"
 	"strings"
@@ -67,6 +68,14 @@ type section struct {
 	numSlots  int  // placeholders of the numerator
 	denSlots  int  // placeholders of the denominator
 	fixedDen  int  // or the denominator itself
+
+	// For a whole number through a plain layout (see wholeLayout):
+	whole     bool   // the layout is plain
+	pre, post string // the text before and after the number, a pad as one space
+	intChars  []byte // the integer placeholders: 0, # or ?
+	fracChars []byte // the decimal placeholders
+	point     bool   // a whole number shows the decimal point
+	spaces    bool   // the output can hold a space, so must be tidied
 
 	// For kindDate and kindElapsed:
 	hasDate   bool // the format names a year, month or day
@@ -340,6 +349,7 @@ func parseSection(code string) (section, bool) {
 		s.kind = kindNumber
 		if digits {
 			s.numberLayout()
+			s.wholeLayout()
 		}
 	}
 	return s, true
@@ -557,6 +567,68 @@ func (s *section) numberLayout() {
 	s.toks = merged
 }
 
+// wholeLayout sees whether a whole number can be written straight
+// through the section: text, then the integer placeholders, then possibly
+// the decimal point and decimal placeholders, then text, with no percent
+// sign, scaling comma, exponent or fraction. Number then writes a whole
+// number of under fifteen digits with appendWhole, which gives what
+// appendNumber gives.
+func (s *section) wholeLayout() {
+	if s.exponent || s.fraction || s.shift != 0 || s.intSlots == 0 {
+		return
+	}
+	var pre, post strings.Builder
+	var intChars, fracChars []byte
+	part := 0 // 0 the text before, 1 the integer, 2 the decimals, 3 the text after
+	for _, t := range s.toks {
+		text := t.text
+		switch t.kind {
+		case tokPad:
+			text = " "
+			fallthrough
+		case tokLiteral:
+			switch part {
+			case 0:
+				pre.WriteString(text)
+			default:
+				part = 3
+				post.WriteString(text)
+			}
+		case tokDigit:
+			if part > 1 {
+				return
+			}
+			part = 1
+			intChars = append(intChars, t.ch)
+		case tokPoint:
+			if part != 1 {
+				return
+			}
+			part = 2
+		case tokFracDigit:
+			if part != 2 {
+				return
+			}
+			fracChars = append(fracChars, t.ch)
+		default:
+			return
+		}
+	}
+	if len(intChars) != s.intSlots || len(fracChars) != s.fracSlots {
+		return
+	}
+	s.whole = true
+	s.pre, s.post = pre.String(), post.String()
+	s.intChars, s.fracChars = intChars, fracChars
+	s.spaces = strings.Contains(s.pre, " ") || strings.Contains(s.post, " ") ||
+		bytes.IndexByte(intChars, '?') >= 0 || bytes.IndexByte(fracChars, '?') >= 0
+	for _, c := range fracChars {
+		if c != '#' {
+			s.point = true
+		}
+	}
+}
+
 func fixedText(t token) string {
 	if t.kind == tokFixedDen {
 		return strconv.Itoa(t.n)
@@ -613,6 +685,7 @@ func (f *Format) Number(dst []byte, v float64, date1904 bool) ([]byte, Result) {
 	}
 	start := len(dst)
 	written := false
+	plain := false // nothing to tidy
 	switch s.kind {
 	case kindGeneral, kindText:
 		for _, t := range s.toks {
@@ -644,9 +717,16 @@ func (f *Format) Number(dst []byte, v float64, date1904 bool) ([]byte, Result) {
 	case kindElapsed:
 		dst = s.appendElapsed(dst, v)
 	default:
-		dst = s.appendNumber(dst, v, minus)
+		if s.whole && math.Abs(v) < 1e15 && v == math.Trunc(v) {
+			dst = s.appendWhole(dst, v, minus)
+			plain = !s.spaces
+		} else {
+			dst = s.appendNumber(dst, v, minus)
+		}
 	}
-	dst = tidy(dst, start)
+	if !plain {
+		dst = tidy(dst, start)
+	}
 	if len(dst) == start {
 		// Nothing is displayed. Zero shown as nothing is an everyday
 		// choice and is left so; any other value is written out.

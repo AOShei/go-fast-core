@@ -378,6 +378,37 @@ func (s *section) appendNumber(dst []byte, v float64, minus bool) []byte {
 // digits to place, right-aligned over slots placeholders; index is this
 // placeholder's position from the left. The first placeholder takes every
 // digit there is no placeholder for.
+// appendWhole appends v, a whole number under 1e15 in magnitude, through
+// a section of a plain layout (wholeLayout). It gives what appendNumber
+// gives, without its general steps: the digits are v's own, and the
+// decimals all zero.
+func (s *section) appendWhole(dst []byte, v float64, minus bool) []byte {
+	if minus && v < 0 {
+		dst = append(dst, '-')
+	}
+	dst = append(dst, s.pre...)
+	var buf [20]byte
+	var digits []byte // none for zero, as decimal.fixed gives
+	if u := uint64(math.Abs(v)); u != 0 {
+		digits = strconv.AppendUint(buf[:0], u, 10)
+	}
+	for i, ch := range s.intChars {
+		dst = appendSlot(dst, digits, i, len(s.intChars), ch, s.thousands)
+	}
+	if s.point {
+		dst = append(dst, '.')
+	}
+	for _, ch := range s.fracChars {
+		switch ch {
+		case '0':
+			dst = append(dst, '0')
+		case '?':
+			dst = append(dst, ' ')
+		}
+	}
+	return append(dst, s.post...)
+}
+
 func appendSlot(dst, digits []byte, index, slots int, ch byte, thousands bool) []byte {
 	// The digit this slot holds is digits[at]; negative means none.
 	at := len(digits) - (slots - index)
