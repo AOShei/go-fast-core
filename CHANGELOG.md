@@ -2,6 +2,23 @@
 
 The module version is the Go module's tag. The schema version is the `schema_version` every document carries; it changes only when a field is removed or its meaning changes (README, "Schema evolution").
 
+## v0.1.11 (schema 0.2)
+
+- **A continued block is joined past footnotes.** `Block.Continued`
+  says that a block continues the nearest block of its kind before it,
+  and footnotes may stand between the two: the notes at the foot of a
+  page where a paragraph is cut, as go-fast-pdf gives them. The
+  renderers joined a continued block only to the block written just
+  before it, so such a paragraph stayed in two pieces with the notes
+  between. Now, when only footnotes stand between them, `Text`,
+  `Markdown`, `WriteText` and `WriteMarkdown` write the continued block
+  first, joined, and the footnotes after it. Only footnotes are passed:
+  any other block written between, such as a note, a heading, a footer
+  included by `Furniture` or a part marker, keeps the pieces apart, as
+  before. A part rendered by itself is unchanged, and so is the JSON.
+- **README: go-fast-xml's row** names its 26 built-in profiles (was 13)
+  and the children its profiles hand over.
+
 ## v0.1.10 (schema 0.2)
 
 - **Two stored kinds, for Visio drawings in go-fast-ooxml:** `shape_data`
