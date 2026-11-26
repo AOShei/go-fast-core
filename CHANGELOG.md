@@ -2,6 +2,18 @@
 
 The module version is the Go module's tag. The schema version is the `schema_version` every document carries; it changes only when a field is removed or its meaning changes (README, "Schema evolution").
 
+## v0.1.10 (schema 0.2)
+
+- **Two stored kinds, for Visio drawings in go-fast-ooxml:** `shape_data`
+  (`StoredShapeData`), the data a shape of a drawing carries and does not
+  draw, as a table after the shape's own text in its page; and
+  `linked_data` (`StoredLinkedData`), a copy the file keeps of data from
+  an outside source it links to, as a table in the stored part.
+  `StoredKindNames` lists them, `Validate` accepts them, and the
+  renderers leave them out unless `RenderOptions.Stored` or
+  `StoredKinds` asks for them, like every stored kind. An addition: the
+  schema is unchanged.
+
 ## v0.1.9 (schema 0.2)
 
 - **`Format.Number` writes a whole number faster** through a plain format: text, digit placeholders with or without thousands grouping, perhaps a decimal point and decimals, text (`#,##0`, `0.00`, `"$"#,##0_)`, and so on), with no percent sign, scaling comma, exponent or fraction. A whole number under 10^15 is written straight from its digits; anything else takes the general steps as before. The output is the same: `TestWholeIsNumber` and the fuzz target `FuzzWhole` (in CI) hold it to the general steps over the LibreOffice table's codes, the built-in formats and codes at the edges, and an independent review compared 21.6 million calls more. On go-fast-msbin's numbers that miss its cache, a whole number takes 28 ns instead of 44. Measured in the libraries, with one worker: go-fast-msbin's 890 dev workbooks 1.45% faster (2.5% fewer instructions), go-fast-ooxml's Common Crawl batch about 1% faster and its corpus unchanged; the document JSON of all 3,248 workbooks is byte-identical.
