@@ -217,12 +217,21 @@ const (
 	// a program defined, with its name in Attrs[AttrName] (RTF
 	// \userprops).
 	StoredCustomProperty = "custom_property"
+	// StoredShapeData: the data a shape of a drawing carries and does not
+	// draw (Visio's shape data, a row per label), a table after the
+	// shape's own text in its page.
+	StoredShapeData = "shape_data"
+	// StoredLinkedData: a copy the file keeps of data from an outside
+	// source it links to (a Visio data recordset), a table in the stored
+	// part.
+	StoredLinkedData = "linked_data"
 )
 
 var storedKindNames = []string{
 	StoredPivotCache, StoredDefinedName, StoredDocumentVariable, StoredCustomXML,
 	StoredFieldCode, StoredMacro, StoredMarkupComment, StoredFormField, StoredAfterEnd,
 	StoredManifestItem, StoredStylesheet, StoredGenerator, StoredCustomProperty,
+	StoredShapeData, StoredLinkedData,
 }
 
 // StoredKindNames returns every value of Attrs[AttrStored], for a command
