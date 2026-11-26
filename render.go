@@ -131,6 +131,7 @@ func (r *renderer) doc(d *Document, path string, depth int) {
 
 // marker writes a line that says where the following text comes from.
 func (r *renderer) marker(label string) {
+	r.flushHeld()
 	if r.any {
 		r.w.WriteString("\n\n")
 	}
@@ -185,6 +186,12 @@ type renderer struct {
 	// linked is the text of the block being written with its links as
 	// Markdown links, or "" if it has none.
 	linked string
+	// held are footnotes not yet written, which followed the last block
+	// written: a continued block that continues that block is written
+	// before them, joined to it (see block). flushing is set while they
+	// are written.
+	held     []*Block
+	flushing bool
 	// inStored is set while the blocks of the stored part are written.
 	inStored bool
 }
@@ -196,6 +203,7 @@ func (r *renderer) storedWanted(kind string) bool {
 }
 
 func (r *renderer) finish() error {
+	r.flushHeld()
 	if r.any {
 		r.w.WriteByte('\n')
 	}
@@ -299,7 +307,21 @@ func joinable(k Kind) bool {
 	return false
 }
 
+// block writes b, or holds it back if it is a footnote.
+//
+// A continued block continues the nearest block of its kind before it,
+// and footnotes may stand between the two: those at the foot of the page
+// where a paragraph is cut. So footnotes that follow a written block are
+// held back until the next block that is written. If that block is
+// joined to the block before the footnotes, it is written first, joined,
+// and the footnotes are held on, until a block that is not joined, a
+// marker or the end; otherwise the footnotes are written before it, as
+// they stand. Only footnotes are held: any other block written between
+// the two pieces, such as a footer included by Furniture, keeps them
+// apart. Blocks left out (furniture, stored data, excluded content) are
+// not written, so they stand between nothing.
 func (r *renderer) block(b *Block) {
+	orig := b
 	r.linked = ""
 	if r.md && b.Kind != KindCode && b.Kind != KindFormula && b.Kind != KindImage && b.Kind != KindThematicBreak {
 		// Links are written into the text before excluded passages are
@@ -321,10 +343,21 @@ func (r *renderer) block(b *Block) {
 	if r.skip(b) {
 		return
 	}
+	if b.Kind == KindFootnote && !r.flushing && (len(r.held) > 0 || r.prev != KindInvalid && r.prev != KindFootnote) {
+		// Held as the document gives it: written later through block
+		// again, which takes the same steps to the same block.
+		r.held = append(r.held, orig)
+		return
+	}
 	// A continued table is run on to the one before it if it has the
 	// same columns: its rows follow as rows of that table.
 	table := b.Kind == KindTable
 	joined := b.Continued && b.Kind == r.prev && (joinable(b.Kind) || table && len(b.Table.Rows[0]) == r.cols)
+	if !joined && len(r.held) > 0 {
+		linked := r.linked
+		r.flushHeld()
+		r.linked = linked
+	}
 	switch {
 	case !r.any:
 	case joined && !r.md && !table:
@@ -344,6 +377,23 @@ func (r *renderer) block(b *Block) {
 	if table {
 		r.cols = len(b.Table.Rows[0])
 	}
+}
+
+// flushHeld writes the footnotes held back, in order.
+func (r *renderer) flushHeld() {
+	if len(r.held) == 0 {
+		return
+	}
+	held, inStored := r.held, r.inStored
+	// Each footnote passed the checks of block where it stood; the stored
+	// part may have begun since, which must not leave it out.
+	r.held, r.inStored, r.flushing = nil, false, true
+	for _, b := range held {
+		r.block(b)
+	}
+	r.inStored, r.flushing = inStored, false
+	clear(held)
+	r.held = held[:0]
 }
 
 func (r *renderer) markdown(b *Block, joined bool) {
