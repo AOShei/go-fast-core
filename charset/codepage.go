@@ -1,5 +1,7 @@
 package charset
 
+import "strings"
+
 // Symbol is what ForCharset returns for a font with the Symbol character
 // set: its bytes are the font's glyph numbers, not characters of any code
 // page (see go-fast-core/symbol).
@@ -89,4 +91,75 @@ func ForCharset(charset int) int {
 		return 850
 	}
 	return 0
+}
+
+// A PageDecoder decodes bytes one at a time in Windows code pages that may
+// change from one byte to the next, as RTF's \'hh escapes and font
+// changes do. A character half read when the code page changes is not a
+// character. Bytes above 0x7F in a code page not decoded here are not
+// characters either, but for the Symbol character set's bullet (0xB7).
+type PageDecoder struct {
+	d     Decoder
+	cp    int
+	known bool
+	set   bool
+}
+
+// Byte decodes byte b of code page cp: see Decoder.Byte.
+func (p *PageDecoder) Byte(cp int, b byte, emit func(r rune, ok bool)) {
+	if !p.set || cp != p.cp {
+		p.Flush(emit)
+		enc, ok := CodePage(cp)
+		p.cp, p.known, p.set = cp, ok, true
+		p.d.Reset(enc)
+	}
+	switch {
+	case p.known:
+		p.d.Byte(b, emit)
+	case b < 0x80:
+		emit(rune(b), true)
+	case cp == Symbol && b == 0xB7:
+		emit(0x2022, true) // the bullet of the Symbol font
+	default:
+		emit(0xFFFD, false)
+	}
+}
+
+// Flush ends a run of bytes: a character half read is not a character.
+func (p *PageDecoder) Flush(emit func(r rune, ok bool)) {
+	if p.known {
+		p.d.Flush(emit)
+	}
+}
+
+// DecodeCodePage decodes b, in Windows code page cp, to a string, as a
+// PageDecoder does, and returns how many characters were not decoded and
+// became U+FFFD.
+func DecodeCodePage(cp int, b []byte) (s string, undecoded int) {
+	ascii := true
+	for _, c := range b {
+		if c >= 0x80 {
+			ascii = false
+			break
+		}
+	}
+	if ascii {
+		if enc, ok := CodePage(cp); !ok || byteWise(enc) {
+			return string(b), 0
+		}
+	}
+	var sb strings.Builder
+	sb.Grow(len(b) + len(b)/2)
+	var p PageDecoder
+	emit := func(r rune, ok bool) {
+		if !ok {
+			undecoded++
+		}
+		sb.WriteRune(r)
+	}
+	for _, c := range b {
+		p.Byte(cp, c, emit)
+	}
+	p.Flush(emit)
+	return sb.String(), undecoded
 }

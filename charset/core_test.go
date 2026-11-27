@@ -235,3 +235,33 @@ func FuzzPiecesAgree(f *testing.F) {
 		}
 	})
 }
+
+func TestDecodeCodePage(t *testing.T) {
+	for _, c := range []struct {
+		cp        int
+		in, want  string
+		undecoded int
+	}{
+		{1252, "caf\xe9 \x80", "café €", 0},
+		{1252, "\x81", "\u0081", 0}, // undefined: the C1 control, as WHATWG and Windows give
+		{932, "\x82\xa0x", "あx", 0},
+		{932, "\x82", "\uFFFD", 1},   // a lead byte at the end
+		{437, "a\xb0", "a\uFFFD", 1}, // not decoded here
+		{Symbol, "a\xb7\xb8", "a•\uFFFD", 1},
+		{65001, "\xe2\x82\xac", "€", 0},
+	} {
+		if got, n := DecodeCodePage(c.cp, []byte(c.in)); got != c.want || n != c.undecoded {
+			t.Errorf("DecodeCodePage(%d, %q) = %q %d, want %q %d", c.cp, c.in, got, n, c.want, c.undecoded)
+		}
+	}
+	// A character half read when the code page changes is not one.
+	var p PageDecoder
+	var got []rune
+	emit := func(r rune, _ bool) { got = append(got, r) }
+	p.Byte(932, 0x82, emit)
+	p.Byte(1252, 'a', emit)
+	p.Flush(emit)
+	if string(got) != "\uFFFDa" {
+		t.Errorf("code page change: %q", string(got))
+	}
+}
