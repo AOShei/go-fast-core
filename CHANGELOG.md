@@ -2,6 +2,39 @@
 
 The module version is the Go module's tag. The schema version is the `schema_version` every document carries; it changes only when a field is removed or its meaning changes (README, "Schema evolution").
 
+## v0.1.14 (schema 0.2)
+
+Additions to the shared readers that their users asked for; nothing
+they did before changes.
+
+- **`xmlscan`:** `Stats.CharRefsReplaced` counts character references to
+  no character XML allows (`&#0;`, a surrogate, a number past U+10FFFF),
+  each read as U+FFFD, so that a library can report the replacement
+  character as such (`text.unmapped_glyphs`). They are still counted in
+  `Repairs` too.
+- **`opc`:** `Written` gives the name of a part made by `FromParts` as
+  `Part.Name` gives it (forward slashes, no leading slash), with its own
+  capitals, as it does for a zip member.
+- **`cfb` and `vba`:** the limits are exported, `cfb.MaxEntries`
+  (262,144 directory entries) and `vba.MaxStream` (256 MiB), so that a
+  message or document that states them follows them.
+- **`vba`:** `Project.FileDamaged` is the compound file's `Damaged`, so
+  that a caller of `ReadBytes` learns that the file was read past damage.
+- **`vba`: a project that names UTF-16 (code page 1200 or 1201) is not
+  read in pairs.** Its source is bytes in a code page; it is read as
+  both copies before v0.1.12 read it, the ASCII kept and the rest U+FFFD
+  and counted in `Undecoded`. Since v0.1.12 `charset` decoded it as
+  UTF-16. go-fast-msbin found it.
+- **`xmlscan` is faster in its default reading** (no spans, no entity
+  resolver), for go-fast-ooxml above all: a start tag is tested for
+  first and its span is set by the caller only when spans are on, and
+  text of no more than one piece takes a short path that leaves out the
+  checks that do nothing there. go-fast-ooxml v0.7.0 on this core runs
+  0.7 % fewer instructions over its 788 corpus files and 0.6 % fewer on
+  its three large files, a quarter and a third of what it gained over
+  v0.6.0's own scanner (+2.80 % and +1.90 %, now +2.10 % and +1.27 %).
+  Nothing read changes.
+
 ## v0.1.13 (schema 0.2)
 
 - **Two more shared readers** (README, "Shared readers"): `rfc822`, the

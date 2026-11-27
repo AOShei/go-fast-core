@@ -247,6 +247,10 @@ type Stats struct {
 	// BindingsCut counts namespace declarations not read because those
 	// in scope already hold MaxBindingBytes.
 	BindingsCut int
+	// CharRefsReplaced counts character references to no character XML
+	// allows anywhere (&#0;, a surrogate, a number past U+10FFFF), each
+	// read as U+FFFD. Each is counted in Repairs too.
+	CharRefsReplaced int
 }
 
 // attr is an attribute of the current start tag, by its offsets in
@@ -908,6 +912,32 @@ func (s *Scanner) popFrame() {
 // charData scans text up to the next '<'.
 func (s *Scanner) charData() scanStatus {
 	b := s.buf[s.pos:s.end]
+	if s.resolve == nil && !s.spans && len(b) <= MaxChunk {
+		// The usual case, as below with what does nothing here left
+		// out: no references to resolve, no span, and no more than one
+		// piece of text in view.
+		n := bytes.IndexByte(b, '<')
+		if n < 0 {
+			switch {
+			case s.eof:
+				n = len(b)
+			case s.pos > 0 || s.end < len(s.buf):
+				return needMore
+			default:
+				if n = cutText(b); n == 0 {
+					return needMore
+				}
+			}
+		}
+		text, used := s.decodeText(b[:n])
+		s.pos += used
+		if len(text) == 0 {
+			return skipped
+		}
+		s.text = text
+		s.kind = Text
+		return emitted
+	}
 	// A complete reference at the start is looked at before the text is
 	// measured: measuring looks for white space to cut at, and a long run
 	// of references would pay for that once per reference.
@@ -1302,6 +1332,20 @@ func (s *Scanner) markup() scanStatus {
 		}
 		return needMore
 	}
+	// A start tag, the most frequent construct, is tested first; its span
+	// is set here, so that startTag pays nothing for spans when they are
+	// off.
+	if nameStarts[b[1]] {
+		if !s.spans {
+			return s.startTag(b)
+		}
+		from := s.pos
+		st := s.startTag(b)
+		if st == emitted {
+			s.tokStart, s.tokEnd = s.at(from), s.hereEnd()
+		}
+		return st
+	}
 	switch c := b[1]; {
 	case c == '/':
 		// The usual case, here rather than in endTag: the end tag of the
@@ -1364,8 +1408,6 @@ func (s *Scanner) markup() scanStatus {
 			return needMore
 		}
 		return s.stray()
-	case isNameStart(c):
-		return s.startTag(b)
 	}
 	return s.stray()
 }
@@ -1614,7 +1656,7 @@ var nameEnds, attrNameEnds = func() (n, a [256]bool) {
 }()
 
 // startTag parses a start tag or empty-element tag beginning at b[0]. The
-// whole tag must be in the window.
+// whole tag must be in the window. markup sets its span.
 func (s *Scanner) startTag(b []byte) scanStatus {
 	if len(b) > maxTag {
 		b = b[:maxTag]
@@ -1653,7 +1695,6 @@ func (s *Scanner) startTag(b []byte) scanStatus {
 			return st
 		}
 	}
-	from := s.pos
 	if len(s.stack) >= s.maxDepth || s.over > 0 {
 		if !s.recover {
 			s.fail(fmt.Errorf("%w (limit %d) at byte %d", ErrDepth, s.maxDepth, s.here()))
@@ -1673,10 +1714,7 @@ func (s *Scanner) startTag(b []byte) scanStatus {
 	s.pos += i
 	s.pendingEnd = selfClose
 	s.kind = Start
-	if s.spans {
-		s.tokStart, s.tokEnd = s.at(from), s.hereEnd()
-	}
-	return emitted
+	return emitted // markup sets the span
 }
 
 // attrsStrict reads the attributes of a start tag from b[i:], up to and
@@ -2475,6 +2513,7 @@ func (s *Scanner) reference(buf, raw []byte) ([]byte, int, bool) {
 		if r == 0 || r > utf8.MaxRune || (r >= 0xD800 && r <= 0xDFFF) {
 			// Not a character XML allows anywhere.
 			s.Stats.Repairs++
+			s.Stats.CharRefsReplaced++
 			r = utf8.RuneError
 		}
 		// A reference to another control character gives the character;

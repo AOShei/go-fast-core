@@ -59,10 +59,10 @@ const (
 	kindRoot    = 5
 )
 
-// maxEntries bounds the directory entries read: 262,144, well above an
+// MaxEntries bounds the directory entries read: 262,144, well above an
 // Outlook message with 10,000 attachments and 10,000 recipients (some ten
 // entries each). A file that has more is refused with ErrLimit.
-const maxEntries = 1 << 18
+const MaxEntries = 1 << 18
 
 // entry is one directory entry.
 type entry struct {
@@ -227,8 +227,8 @@ func open(r io.ReaderAt, size int64, directory bool) (*File, error) {
 			return nil, err
 		}
 		for at := int64(0); at+128 <= sectorSize; at += 128 {
-			if len(f.entries) >= maxEntries {
-				return nil, fmt.Errorf("%w: more than %d directory entries", ErrLimit, maxEntries)
+			if len(f.entries) >= MaxEntries {
+				return nil, fmt.Errorf("%w: more than %d directory entries", ErrLimit, MaxEntries)
 			}
 			raw := buf[at : at+128]
 			e := entry{kind: raw[66], left: le.Uint32(raw[68:]), right: le.Uint32(raw[72:]), child: le.Uint32(raw[76:]),

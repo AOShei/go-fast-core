@@ -185,12 +185,7 @@ func Open(r io.ReaderAt, size int64, lim Limits) (*Package, error) {
 		}
 		p.parts[name] = &member{files: []*zip.File{f}}
 		p.names = append(p.names, name)
-		if shown := strings.TrimLeft(strings.ReplaceAll(f.Name, "\\", "/"), "/"); shown != name {
-			if p.written == nil {
-				p.written = map[string]string{}
-			}
-			p.written[name] = shown
-		}
+		p.keepWritten(name, f.Name)
 	}
 	p.interleave(pieces)
 	if _, ok := p.parts[contentTypesName]; !ok {
@@ -219,7 +214,8 @@ func newPackage(n int, lim Limits) *Package {
 
 // FromParts makes a package of parts kept outside a zip archive. Of two
 // parts with one name the first is the part, and the second is counted
-// in Ambiguous.
+// in Ambiguous. Written gives a part's Name as given, with forward
+// slashes and no leading slash.
 func FromParts(parts []Part, lim Limits) *Package {
 	p := newPackage(len(parts), lim)
 	p.typed = true
@@ -231,11 +227,24 @@ func FromParts(parts []Part, lim Limits) *Package {
 		}
 		p.parts[name] = &member{ext: &parts[i]}
 		p.names = append(p.names, name)
+		p.keepWritten(name, parts[i].Name)
 		if ct := parts[i].ContentType; ct != "" {
 			p.overrides[name] = ct
 		}
 	}
 	return p
+}
+
+// keepWritten keeps the name a part is written with, for Written, where it
+// differs from its canonical name: with forward slashes and no leading
+// slash, but its own capitals and escapes.
+func (p *Package) keepWritten(name, raw string) {
+	if shown := strings.TrimLeft(strings.ReplaceAll(raw, "\\", "/"), "/"); shown != name {
+		if p.written == nil {
+			p.written = map[string]string{}
+		}
+		p.written[name] = shown
+	}
 }
 
 // piece is one piece of an interleaved part.
@@ -557,8 +566,8 @@ func (p *Package) Has(name string) bool {
 	return ok
 }
 
-// Written returns a part's name as the archive writes it, with its own
-// capitals. Part names are matched without regard to case, but a name
+// Written returns a part's name as the archive writes it (or as Part.Name
+// gives it, for a package made by FromParts), with its own capitals. Part names are matched without regard to case, but a name
 // shown to a person, or used as an identifier in the output, should be the
 // file's own. An interleaved part has the name of the folder its pieces
 // are in.
