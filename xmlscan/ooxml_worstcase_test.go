@@ -20,7 +20,7 @@ func TestWorstCaseInputsAreLinear(t *testing.T) {
 	const size = 4 << 20
 	full, quarter := worstCases(size), worstCases(size/4)
 	read := func(name, in, way string) time.Duration {
-		opts := &Options{Recover: strings.Contains(name, "recovery"), MaxTokenBytes: 2 * size}
+		opts := &Options{Recover: strings.Contains(name, "recovery"), Markup: strings.Contains(name, "tokens"), MaxTokenBytes: 2 * size}
 		data := []byte(in)
 		return timed(func() {
 			s := NewBytes(data, opts)
@@ -69,6 +69,7 @@ func worstCases(size int) map[string]string {
 		"all carriage returns":       `<a>` + strings.Repeat("\r", size) + `</a>`,
 		"long comment":               `<a><!--` + strings.Repeat("-", size) + `--></a>`,
 		"long cdata of brackets":     `<a><![CDATA[` + strings.Repeat("]", size) + `]]></a>`,
+		"long comment, as tokens":    `<a><!--` + strings.Repeat("-", size) + `--></a>`,
 		"unterminated tag":           `<a ` + strings.Repeat(`x="1" `, size/6),
 		"unterminated comment":       `<a><!--` + strings.Repeat("-", size),
 		"many namespace prefixes": `<r ` + func() string {

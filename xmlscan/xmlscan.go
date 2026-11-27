@@ -918,7 +918,16 @@ func (s *Scanner) charData() scanStatus {
 			}
 		}
 	}
-	n := bytes.IndexByte(b, '<')
+	// Look no further than one token can take: a long text from memory
+	// would otherwise be searched to its end once for each piece.
+	look := b
+	if len(look) > MaxChunk+1 {
+		look = look[:MaxChunk+1]
+	}
+	n := bytes.IndexByte(look, '<')
+	if n < 0 && len(look) < len(b) {
+		n = len(look) // more than a piece of text: cut below
+	}
 	if n < 0 {
 		switch {
 		case s.eof:
@@ -1157,11 +1166,15 @@ func afterSpace(b []byte, n int) int {
 // it is the last piece, and false when more input is needed.
 func (s *Scanner) section(term []byte) (n, used int, final, ok bool) {
 	b := s.buf[s.pos:s.end]
-	i := bytes.Index(b, term)
+	// Look no further than the end of a piece: a long section in memory
+	// would otherwise be searched to its end once for each piece.
+	lim := min(len(b), MaxChunk+len(term))
+	i := bytes.Index(b[:lim], term)
+	whole := lim == len(b) // all there is in view was searched
 	switch {
 	case i >= 0 && i <= MaxChunk:
 		return i, i + len(term), true, true
-	case i < 0 && s.eof && len(b) <= MaxChunk:
+	case i < 0 && whole && s.eof && len(b) <= MaxChunk:
 		// Not terminated: what there is is the content.
 		what := "comment is not terminated"
 		if term[0] == ']' {
@@ -1171,7 +1184,7 @@ func (s *Scanner) section(term []byte) (n, used int, final, ok bool) {
 			return 0, 0, false, false
 		}
 		return len(b), len(b), true, true
-	case i < 0 && !s.eof && (s.pos > 0 || s.end < len(s.buf)):
+	case i < 0 && whole && !s.eof && (s.pos > 0 || s.end < len(s.buf)):
 		return 0, 0, false, false // there is room to look further
 	}
 	n = chunkEnd(b, MaxChunk)

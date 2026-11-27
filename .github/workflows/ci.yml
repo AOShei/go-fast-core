@@ -48,14 +48,21 @@ jobs:
             GOOS=${target%/*} GOARCH=${target#*/} go vet ./...
           done
 
+      # The xmlscanpoison tag overwrites each token once the next is
+      # asked for, so a reader that keeps a view too long reads '#'.
+      - name: Test, xmlscanpoison
+        if: matrix.os == 'ubuntu-latest'
+        run: go test -short -tags xmlscanpoison ./xmlscan/ ./opc/
+
       - name: Test, 32-bit
         if: matrix.os == 'ubuntu-latest'
         run: GOARCH=386 go test -short ./...
 
   fuzz:
     # Every fuzz target, 20 s each, one job per target so that they run
-    # side by side with the tests. inflate and ziprecover read untrusted
-    # input for every library in the series; numfmt shows every cell.
+    # side by side with the tests. inflate, ziprecover, charset, xmlscan
+    # and cfb read untrusted input for every library in the series; numfmt
+    # shows every cell.
     strategy:
       fail-fast: false
       matrix:
@@ -72,6 +79,12 @@ jobs:
           - ./inflate FuzzRawReader
           - ./inflate FuzzReaderInputOffset
           - ./inflate FuzzGzipReader
+          - ./charset FuzzCharset
+          - ./charset FuzzDoubleByte
+          - ./charset FuzzPiecesAgree
+          - ./xmlscan FuzzXML
+          - ./xmlscan FuzzXMLScanner
+          - ./cfb FuzzCFB
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
