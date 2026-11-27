@@ -44,6 +44,8 @@ import (
 	"math"
 	"sync"
 	"unicode/utf8"
+
+	"github.com/AOShei/go-fast-core/charset"
 )
 
 // Kind is the type of a token.
@@ -2287,7 +2289,7 @@ func (s *Scanner) decodeValue(raw []byte) []byte {
 	if bytes.IndexByte(raw, '&') < 0 && !hasAttrSpace(raw) {
 		// Nothing to decode: bytes beyond ASCII, which must be UTF-8.
 		v := raw
-		if !utf8.Valid(v) {
+		if !charset.ValidUTF8(v) {
 			start := len(s.attrBuf)
 			s.attrBuf = s.appendValid(s.attrBuf, v)
 			v = s.attrBuf[start:]
@@ -2303,7 +2305,7 @@ func (s *Scanner) decodeValue(raw []byte) []byte {
 	s.valueEnd, s.valueFull = start+room, false
 	s.attrBuf = s.decodeAttr(s.attrBuf, raw)
 	v := s.attrBuf[start:]
-	if !utf8.Valid(v) {
+	if !charset.ValidUTF8(v) {
 		s.fixValue = s.appendValid(s.fixValue[:0], v)
 		s.attrBuf = append(s.attrBuf[:start], s.fixValue...)
 		v = s.attrBuf[start:]
@@ -2367,7 +2369,7 @@ func hasAttrSpace(v []byte) bool {
 // validText returns t, or, when t is not valid UTF-8, a copy in which
 // each byte that is not part of a character is U+FFFD.
 func (s *Scanner) validText(t []byte) []byte {
-	if utf8.Valid(t) {
+	if charset.ValidUTF8(t) {
 		return t
 	}
 	s.fixed = s.appendValid(s.fixed[:0], t)

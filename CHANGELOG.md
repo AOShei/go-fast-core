@@ -2,6 +2,32 @@
 
 The module version is the Go module's tag. The schema version is the `schema_version` every document carries; it changes only when a field is removed or its meaning changes (README, "Schema evolution").
 
+## v0.1.17 (schema 0.2)
+
+- **`xmlscan`: text and attribute values are valid UTF-8,** whatever the
+  input. A byte of UTF-8 input that is not part of a character is U+FFFD,
+  counted in the new `Stats.InvalidUTF8`, so that the readers of the
+  scanner need no checks of their own and can report it alike
+  (`text.unmapped_glyphs`). Before, such bytes were handed on, and each
+  library mended them its own way: some with U+FFFD, some by dropping
+  them, none counting them. The check is folded into the scans the
+  scanner already makes: a value of printable ASCII, and short ASCII
+  text, are not looked at again.
+- **`charset`: `ValidUTF8` and `UTF8Len`,** the one check of UTF-8 in
+  core, by the ranges each byte may take (RFC 3629). `ValidUTF8` agrees
+  with `utf8.Valid` and is faster on text that is not all ASCII: it goes
+  back to eight bytes at a time after each character beyond ASCII, where
+  `utf8.Valid` reads the rest a byte at a time.
+- **`clean` checks characters by their bytes** (`charset.UTF8Len`), not
+  by decoding each with `utf8.DecodeRune`, and copies a two-byte
+  character that needs nothing done without a call. Its output is the
+  same, byte for byte (a test holds it to the former code on 100,000
+  random inputs).
+- **Cost,** measured on go-fast-ooxml v0.7.0's library in instructions:
+  +0.74 % over its 788 corpus files and +0.49 % over its three large
+  files, against v0.1.15. ooxml's own checks, which it can now drop,
+  cost nothing measurable: they are on a few fields, not on the text.
+
 ## v0.1.16 (schema 0.2)
 
 - **`envelope`, a new shared package:** what protects an encrypted

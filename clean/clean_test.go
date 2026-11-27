@@ -4,9 +4,12 @@
 package clean
 
 import (
+	"math/rand/v2"
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/AOShei/go-fast-core"
 )
 
 func TestString(t *testing.T) {
@@ -160,5 +163,74 @@ func BenchmarkAppend(b *testing.B) {
 				dst, _ = Append(dst[:0], src, Ligatures)
 			}
 		})
+	}
+}
+
+// appendByRunes is Append as it was written before v0.1.17, decoding each
+// character beyond ASCII: the reference the faster Append is held to.
+func appendByRunes(dst, b []byte, flags Flags) ([]byte, int) {
+	removed := 0
+	for i := 0; i < len(b); {
+		c := b[i]
+		if c < 0x80 {
+			i++
+			switch {
+			case c == '\r':
+				if i < len(b) && b[i] == '\n' {
+					i++
+				}
+				dst = append(dst, '\n')
+			case c == '\v' || c == '\f':
+				dst = append(dst, '\n')
+			case (c < 0x20 && c != '\n' && c != '\t') || c == 0x7F:
+				removed++
+			default:
+				dst = append(dst, c)
+			}
+			continue
+		}
+		r, size := utf8.DecodeRune(b[i:])
+		i += size
+		switch {
+		case r == utf8.RuneError && size == 1:
+			dst = utf8.AppendRune(dst, utf8.RuneError)
+		case r == 0x85 || r == 0x2028 || r == 0x2029:
+			dst = append(dst, '\n')
+		case r < 0xA0:
+			removed++
+		case flags&Ligatures != 0 && r >= 0xFB00 && r <= 0xFB06:
+			dst = append(dst, gofastcore.Ligature(r)...)
+		default:
+			dst = utf8.AppendRune(dst, r)
+		}
+	}
+	return dst, removed
+}
+
+func TestAppendAsByRunes(t *testing.T) {
+	check := func(b []byte) {
+		t.Helper()
+		for _, f := range []Flags{0, Ligatures} {
+			got, gn := Append(nil, b, f)
+			want, wn := appendByRunes(nil, b, f)
+			if string(got) != string(want) || gn != wn {
+				t.Fatalf("Append(%q, %d) = %q %d, want %q %d", b, f, got, gn, want, wn)
+			}
+		}
+	}
+	for _, s := range []string{"", "\u0085x\u2028y\u2029z\u0080\u009f\u00a0", "\ufb00\ufb06\ufb07\ufaff", "\xc2", "\xe2\x80", "\xef\xac",
+		"\xed\xa0\x80", "\xf4\x90\x80\x80", "\xc0\x80", "\uFFFD\xff", "caf\u00e9 \u03bb\u03cc\u03b3\u03bf\u03c2\r\n\v\f\x01\x7f"} {
+		for i := 0; i <= len(s); i++ {
+			check([]byte(s[i:]))
+		}
+	}
+	const pool = "ab \r\n\t\x01\x7f\x80\x85\x9f\xa0\xa8\xa9\xac\xbf\xc2\xc3\xe2\xef\xed\xf0\xf4\x90\xff"
+	r := rand.New(rand.NewPCG(3, 4))
+	for range 100000 {
+		b := make([]byte, r.IntN(24))
+		for i := range b {
+			b[i] = pool[r.IntN(len(pool))]
+		}
+		check(b)
 	}
 }

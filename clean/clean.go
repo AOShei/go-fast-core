@@ -21,6 +21,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/AOShei/go-fast-core"
+	"github.com/AOShei/go-fast-core/charset"
 )
 
 // Flags select the conventions to apply beyond validity and control
@@ -103,20 +104,35 @@ func Append(dst, b []byte, flags Flags) ([]byte, int) {
 			}
 			continue
 		}
-		r, size := utf8.DecodeRune(b[i:])
-		i += size
-		switch {
-		case r == utf8.RuneError && size == 1:
-			dst = utf8.AppendRune(dst, utf8.RuneError) // an invalid byte
-		case r == 0x85 || r == 0x2028 || r == 0x2029:
-			dst = append(dst, '\n') // next line, line separator, paragraph separator
-		case r < 0xA0:
-			removed++ // a C1 control character
-		case flags&Ligatures != 0 && r >= 0xFB00 && r <= 0xFB06:
-			dst = append(dst, gofastcore.Ligature(r)...) // the letters, by the series' rule
-		default:
-			dst = utf8.AppendRune(dst, r)
+		// Beyond ASCII: the character is checked by the ranges its bytes
+		// may take, and only those the conventions change are looked at
+		// further, by their bytes; the rest are copied as they are.
+		if c >= 0xC3 && c <= 0xDF && i+1 < len(b) && b[i+1]&0xC0 == 0x80 {
+			// Two bytes that need nothing done (not U+0080 to U+00BF,
+			// where the C1 controls and U+0085 are): the usual case
+			// beyond ASCII, copied without a call.
+			dst = append(dst, c, b[i+1])
+			i += 2
+			continue
 		}
+		n := charset.UTF8Len(b[i:])
+		switch {
+		case n == 0:
+			dst = append(dst, "\uFFFD"...) // an invalid byte
+			i++
+			continue
+		case n == 2 && c == 0xC2 && b[i+1] == 0x85,
+			n == 3 && c == 0xE2 && b[i+1] == 0x80 && (b[i+2] == 0xA8 || b[i+2] == 0xA9):
+			dst = append(dst, '\n') // next line, line separator, paragraph separator
+		case n == 2 && c == 0xC2 && b[i+1] < 0xA0:
+			removed++ // a C1 control character, U+0080 to U+009F
+		case n == 3 && flags&Ligatures != 0 && c == 0xEF && b[i+1] == 0xAC && b[i+2] <= 0x86:
+			// U+FB00 to U+FB06: the letters, by the series' rule.
+			dst = append(dst, gofastcore.Ligature(0xFB00+rune(b[i+2]-0x80))...)
+		default:
+			dst = append(dst, b[i:i+n]...)
+		}
+		i += n
 	}
 	return dst, removed
 }
