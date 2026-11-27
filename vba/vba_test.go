@@ -107,6 +107,24 @@ func TestUTF16CodePageIsNotDecoded(t *testing.T) {
 	}
 }
 
+// ReadBytes says the file was damaged even when its project cannot be
+// read: the error comes with a Project holding FileDamaged.
+func TestFileDamagedWithError(t *testing.T) {
+	data := cfbtest.Compound(map[string][]byte{"x": []byte("y")})
+	p, err := read(data, 100)
+	if !errors.Is(err, vba.ErrNotProject) || p == nil || p.FileDamaged != "" {
+		t.Fatalf("whole file: %v, %+v", err, p)
+	}
+	data[28] = 0 // the byte order mark: the file is read, and its damage noted
+	p, err = read(data, 100)
+	if !errors.Is(err, vba.ErrNotProject) || p == nil || p.FileDamaged == "" || len(p.Modules) != 0 {
+		t.Fatalf("damaged file: %v, %+v", err, p)
+	}
+	if p, err := read([]byte("not a compound file"), 100); err == nil || p != nil {
+		t.Errorf("not a compound file: %v, %+v", err, p)
+	}
+}
+
 func TestProject(t *testing.T) {
 	data := vbatest.VBAProject(1252,
 		vbatest.VBAModule{Name: "Module1", Code: "Attribute VB_Name = \"Module1\"\r\nSub Hello()\r\n    MsgBox \"Caf\xe9 \x80\"\r\nEnd Sub\r\n"},
