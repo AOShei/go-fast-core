@@ -71,12 +71,21 @@ const MaxStream = 1 << 28
 // ReadBytes reads the project of a vbaProject.bin, the compound file an
 // Office Open XML file keeps its macros in: the VBA storage is at its
 // root. limit is Read's.
+//
+// When the compound file opens but its project cannot be read, the error
+// comes with a Project that holds only FileDamaged, so that a caller
+// learns of damage to the file either way. When the file does not open,
+// the Project is nil.
 func ReadBytes(data []byte, limit int64) (*Project, error) {
 	f, err := cfb.Open(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		return nil, err
 	}
-	return Read(f, nil, limit)
+	p, err := Read(f, nil, limit)
+	if err != nil {
+		return &Project{FileDamaged: f.Damaged}, err
+	}
+	return p, nil
 }
 
 // Read reads the project in the storage of f that path names: the storage

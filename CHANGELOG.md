@@ -2,6 +2,15 @@
 
 The module version is the Go module's tag. The schema version is the `schema_version` every document carries; it changes only when a field is removed or its meaning changes (README, "Schema evolution").
 
+## v0.1.15 (schema 0.2)
+
+- **`vba.ReadBytes` reports a damaged file even when the project cannot
+  be read.** When the compound file opens but `Read` fails (no project,
+  or its `dir` stream cannot be read), the error now comes with a
+  `Project` that holds only `FileDamaged`; it was nil. When the file does
+  not open, the `Project` is still nil. go-fast-ooxml asked for it, so
+  that `ReadBytes` can replace its `cfb.Open` and `vba.Read`.
+
 ## v0.1.14 (schema 0.2)
 
 Additions to the shared readers that their users asked for; nothing
