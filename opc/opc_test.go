@@ -238,6 +238,29 @@ func TestPieceNames(t *testing.T) {
 	}
 }
 
+// Refund gives back what was read, so the same bytes can be read again
+// within the budget; n <= 0 does nothing.
+func TestRefund(t *testing.T) {
+	p := open(t, zipOf(t, zm{name: "a.xml", body: strings.Repeat("x", 500)}), Limits{MaxDecodedBytes: 600})
+	for round := range 3 {
+		rc, _ := p.Open("a.xml")
+		b, err := io.ReadAll(rc)
+		rc.Close()
+		if len(b) != 500 || err != nil {
+			t.Fatalf("round %d: %d %v", round, len(b), err)
+		}
+		p.Refund(int64(len(b)))
+		p.Refund(0)
+		p.Refund(-1000)
+		if p.Remaining() != 600 {
+			t.Fatalf("round %d: remaining %d", round, p.Remaining())
+		}
+	}
+	if !p.Charge(600) || p.Charge(1) {
+		t.Error("Charge after Refund")
+	}
+}
+
 func TestBudgetAndEncrypted(t *testing.T) {
 	p := open(t, zipOf(t,
 		zm{name: "a.xml", body: strings.Repeat("x", 1000)},

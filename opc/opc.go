@@ -653,8 +653,22 @@ func (p *Package) Restore(budget int64) { p.budget.Store(budget) }
 
 // Charge takes n bytes from the decompression budget, for what a reader
 // decompresses itself from a part it has read (the code of a VBA project).
-// It reports false if the budget has run out.
+// It reports false if the budget has run out. n is not negative: Refund
+// gives bytes back.
 func (p *Package) Charge(n int64) bool { return p.budget.Add(-n) >= 0 }
+
+// Refund gives n bytes back to the decompression budget: bytes that Open's
+// readers or Charge took and that the reader counts against a budget of
+// its own instead. go-fast-pdf counts each page of an XPS document in page
+// order, so that a document cut by the limit ends at the same page for any
+// number of workers, and gives the bytes of a page back to the package,
+// whose budget then bounds only what belongs to no page. A reader must
+// not give back more than was taken. n <= 0 does nothing.
+func (p *Package) Refund(n int64) {
+	if n > 0 {
+		p.budget.Add(n)
+	}
+}
 
 // Open returns a reader for a part's decompressed content. Every byte read
 // is charged to the package's budget, and a read that goes over it fails
