@@ -2,6 +2,25 @@
 
 The module version is the Go module's tag. The schema version is the `schema_version` every document carries; it changes only when a field is removed or its meaning changes (README, "Schema evolution").
 
+## v0.1.14 (schema 0.2)
+
+Additions to the shared readers that their users asked for; nothing
+they did before changes.
+
+- **`xmlscan`:** `Stats.CharRefsReplaced` counts character references to
+  no character XML allows (`&#0;`, a surrogate, a number past U+10FFFF),
+  each read as U+FFFD, so that a library can report the replacement
+  character as such (`text.unmapped_glyphs`). They are still counted in
+  `Repairs` too.
+- **`opc`:** `Written` gives the name of a part made by `FromParts` as
+  `Part.Name` gives it (forward slashes, no leading slash), with its own
+  capitals, as it does for a zip member.
+- **`cfb` and `vba`:** the limits are exported, `cfb.MaxEntries`
+  (262,144 directory entries) and `vba.MaxStream` (256 MiB), so that a
+  message or document that states them follows them.
+- **`vba`:** `Project.FileDamaged` is the compound file's `Damaged`, so
+  that a caller of `ReadBytes` learns that the file was read past damage.
+
 ## v0.1.13 (schema 0.2)
 
 - **Two more shared readers** (README, "Shared readers"): `rfc822`, the

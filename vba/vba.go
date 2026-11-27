@@ -53,6 +53,10 @@ type Project struct {
 	// Damaged says some of the project could not be read: what was read
 	// up to the damage is kept.
 	Damaged bool
+	// FileDamaged is the compound file's own Damaged: set, to what was
+	// wrong, when the file the project is in was read in spite of damage
+	// to its structure. It is how a caller of ReadBytes learns of it.
+	FileDamaged string
 	// Unlisted counts the modules past maxModules, which are not read.
 	Unlisted int
 }
@@ -60,8 +64,9 @@ type Project struct {
 // maxModules bounds the modules read from one project.
 const maxModules = 1 << 12
 
-// maxStream bounds the size of a stream of a project that is read.
-const maxStream = 1 << 28
+// MaxStream bounds the size of a stream of a project that is read: 256 MiB.
+// A larger one is refused with ErrTooLarge.
+const MaxStream = 1 << 28
 
 // ReadBytes reads the project of a vbaProject.bin, the compound file an
 // Office Open XML file keeps its macros in: the VBA storage is at its
@@ -90,11 +95,11 @@ func Read(f *cfb.File, path []string, limit int64) (*Project, error) {
 	if err != nil {
 		return nil, err
 	}
-	raw, err := readAll(dirStream, maxStream)
+	raw, err := readAll(dirStream, MaxStream)
 	if err != nil {
 		return nil, err
 	}
-	p := &Project{CodePage: 1252}
+	p := &Project{CodePage: 1252, FileDamaged: f.Damaged}
 	dir, err := Decompress(raw, 1<<24)
 	if err != nil {
 		if len(dir) == 0 {
@@ -115,7 +120,7 @@ func Read(f *cfb.File, path []string, limit int64) (*Project, error) {
 			p.Damaged = true
 			continue
 		}
-		src, err := readAll(stream, maxStream)
+		src, err := readAll(stream, MaxStream)
 		if err != nil || m.offset > int64(len(src)) {
 			p.Damaged = true
 			continue

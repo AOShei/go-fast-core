@@ -79,6 +79,19 @@ func TestDecompressDamage(t *testing.T) {
 // read is ReadBytes: the project's storage at the root of the file.
 func read(data []byte, limit int64) (*vba.Project, error) { return vba.ReadBytes(data, limit) }
 
+func TestFileDamaged(t *testing.T) {
+	data := vbatest.VBAProject(1252, vbatest.VBAModule{Name: "Module1", Code: "Sub A()\r\nEnd Sub\r\n"})
+	p, err := read(data, 1<<20)
+	if err != nil || p.FileDamaged != "" {
+		t.Fatalf("whole file: %v, %q", err, p.FileDamaged)
+	}
+	data[28] = 0 // the byte order mark: the file is read, and its damage noted
+	p, err = read(data, 1<<20)
+	if err != nil || p.FileDamaged == "" || len(p.Modules) != 1 || p.Modules[0].Code != "Sub A()\nEnd Sub\n" {
+		t.Fatalf("damaged file: %v, %+v", err, p)
+	}
+}
+
 func TestProject(t *testing.T) {
 	data := vbatest.VBAProject(1252,
 		vbatest.VBAModule{Name: "Module1", Code: "Attribute VB_Name = \"Module1\"\r\nSub Hello()\r\n    MsgBox \"Caf\xe9 \x80\"\r\nEnd Sub\r\n"},

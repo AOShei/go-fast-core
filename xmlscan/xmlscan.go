@@ -247,6 +247,10 @@ type Stats struct {
 	// BindingsCut counts namespace declarations not read because those
 	// in scope already hold MaxBindingBytes.
 	BindingsCut int
+	// CharRefsReplaced counts character references to no character XML
+	// allows anywhere (&#0;, a surrogate, a number past U+10FFFF), each
+	// read as U+FFFD. Each is counted in Repairs too.
+	CharRefsReplaced int
 }
 
 // attr is an attribute of the current start tag, by its offsets in
@@ -2475,6 +2479,7 @@ func (s *Scanner) reference(buf, raw []byte) ([]byte, int, bool) {
 		if r == 0 || r > utf8.MaxRune || (r >= 0xD800 && r <= 0xDFFF) {
 			// Not a character XML allows anywhere.
 			s.Stats.Repairs++
+			s.Stats.CharRefsReplaced++
 			r = utf8.RuneError
 		}
 		// A reference to another control character gives the character;

@@ -528,6 +528,31 @@ func TestRepairsAreCounted(t *testing.T) {
 	}
 }
 
+func TestCharRefsReplacedAreCounted(t *testing.T) {
+	s := NewBytes([]byte(`<a x="&#0;" y="&#65;">&#0;&#xD800;&#x110000;&#1;&#x41;</a>`), nil)
+	var text []byte
+	for k := s.Next(); k != EOF; k = s.Next() {
+		switch k {
+		case Start:
+			// A value read twice is decoded, and counted, once.
+			for range 2 {
+				if v, _ := s.Attr(NoSpace, "x"); string(v) != "\uFFFD" {
+					t.Errorf("x = %q", v)
+				}
+			}
+			s.Attr(NoSpace, "y")
+		case Text:
+			text = append(text, s.Text()...)
+		}
+	}
+	if s.Err() != nil || string(text) != "\uFFFD\uFFFD\uFFFD\x01A" {
+		t.Errorf("err %v, text %q", s.Err(), text)
+	}
+	if s.Stats.CharRefsReplaced != 4 || s.Stats.Repairs != 4 {
+		t.Errorf("replaced %d, repairs %d, want 4 and 4", s.Stats.CharRefsReplaced, s.Stats.Repairs)
+	}
+}
+
 func TestResetReusesBuffers(t *testing.T) {
 	s := NewBytes([]byte(`<a><b>&amp;</b></a>`), nil)
 	first, _ := dump(s)

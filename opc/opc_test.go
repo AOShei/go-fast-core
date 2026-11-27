@@ -267,6 +267,18 @@ func TestFromParts(t *testing.T) {
 	if p.Ambiguous() != 1 || p.ContentType("word/document.xml") != "application/x-doc" {
 		t.Errorf("ambiguous %d, type %q", p.Ambiguous(), p.ContentType("word/document.xml"))
 	}
+	// Written gives the name as the part gives it, not its canonical form;
+	// the second part of the name is not a part.
+	if w := p.Written("WORD/DOCUMENT.XML"); w != "word/document.xml" {
+		t.Errorf("Written %q", w)
+	}
+	q := FromParts([]Part{{Name: "\\Media\\Image1.PNG"}, {Name: "plain.xml"}}, noLimits)
+	if w := q.Written("media/image1.png"); w != "Media/Image1.PNG" {
+		t.Errorf("Written %q", w)
+	}
+	if w := q.Written("plain.xml"); w != "plain.xml" {
+		t.Errorf("Written %q", w)
+	}
 	var s xmlscan.Scanner
 	c, err := p.Scan("word/document.xml", &s, nil)
 	if err != nil {
