@@ -419,6 +419,38 @@ The behaviour is held to what LibreOffice shows: `testdata/libreoffice.tsv` has 
 - **One per sheet reader.** A `Cache` is not safe for concurrent use. `Reset` empties it when a sheet begins and keeps its memory; a reader that makes a new sheet reader for each sheet can keep its caches in a `sync.Pool` between sheets.
 - **The size is the library's choice**, a trade of memory for speed measured in each library. A cache too small for a sheet's distinct values can cost more than it saves. go-fast-msbin measured its 1,111-workbook batch 7.9% faster with 4,096 entries (all workers), go-fast-ooxml its Common Crawl batch 1.6% faster with 256 (one worker), with the output unchanged.
 
+### Shared readers
+
+Code that more than one library needs lives here once, so that a fix is made once and every library reads the same bytes the same way. Each package came from the libraries that had a copy of it; where the copies differed, the one here keeps every fix.
+
+| Package | What it reads | Came from |
+|---|---|---|
+| `charset` | text in a character encoding: UTF-8, UTF-16, the Windows code pages, Mac Roman, the WHATWG Encoding Standard's single-byte encodings, Shift_JIS, GBK, GB18030, EUC-KR, Big5 (with HKSCS), EUC-JP and ISO-2022-JP; by label (`Lookup`), by Windows code page (`CodePage`) or by a font's character set (`ForCharset`); whole (`Decode`, with a map back to source offsets), in pieces (`Decoder`, `NewReader`), a byte at a time (`Decoder.Byte`, `PageDecoder` for code pages that change from byte to byte) or as a string (`DecodeCodePage`); and what decides an encoding (`SniffText`, and `SniffHTML` with the HTML standard's `<meta>` prescan) | go-fast-html (shared with go-fast-xml), go-fast-email, go-fast-rtf (shared with go-fast-msbin), go-fast-ooxml |
+| `xmlscan` | XML, as a stream of tokens, in bounded memory, without allocating per token; namespaces by number (`Options.Spaces`) and by URI | go-fast-ooxml, go-fast-odf, go-fast-xml |
+| `opc` | the container of the Open Packaging Conventions (Word, Excel, PowerPoint, Visio, XPS): the zip archive, the content-types table, relationships, part names, interleaved parts, the decompression budget | go-fast-ooxml |
+| `cfb` | compound files (the container of the binary Office formats, Outlook messages, encrypted Office files), and writes them (`Write`, `Export`); `cfbtest` builds them for tests | go-fast-msbin, go-fast-email, go-fast-ooxml |
+| `clean` | strings to the text conventions: valid UTF-8, no control characters, line ends as line feeds, ligatures as letters, labels bounded (`MaxLabel`, 4 KiB) | go-fast-ooxml and go-fast-msbin, go-fast-odf |
+| `symbol` | the characters of the Symbol, Wingdings and Webdings fonts, as Unicode | go-fast-ooxml, go-fast-msbin |
+| `label` | list labels: bullets, Roman numerals, letters as Office repeats them (`Letters`: AA, BB) and in base 26 (`Alpha`: AA, AB) | go-fast-ooxml, go-fast-msbin |
+| `hidden` | what the file declares about the display of a paragraph's spans, placed on blocks and spans | go-fast-ooxml, go-fast-msbin |
+| `vba` | the source of a VBA project, in any storage of a compound file (`Read`) or a vbaProject.bin (`ReadBytes`); `vbatest` builds projects for tests | go-fast-msbin, go-fast-ooxml |
+
+**Decoding where the copies disagreed.** The answer here is the WHATWG Encoding Standard's: a byte a single-byte Windows code page leaves undefined in 0x80 to 0x9F is the C1 control of the same value (0x81 in windows-1252 is U+0081), not U+FFFD; the label ISO-8859-1 means windows-1252; GBK byte 0x80 is the euro sign; Mac Roman is Apple's table (0xDB the euro sign); a lead byte followed by an ASCII byte that makes no character with it is U+FFFD and the ASCII byte is read again; the user-defined areas of code pages 932 and 936 are Private Use Area characters, and Shift_JIS byte 0x80 is U+0080.
+
+**The XML scanner's options.** By default it reads as go-fast-ooxml's and go-fast-odf's scanners did: well-formed XML, any error ends the scan (`ErrSyntax`), comments and processing instructions are passed over, a document type declaration is accepted only if it declares nothing (no internal subset, before the root element, the only one), and an attribute's value is decoded when it is read. The encoding is the one a byte order mark or the XML declaration names, decoded by `charset`. What XML from anywhere needs is in options, so that a reader of Office XML does not pay for it:
+
+| Option | |
+|---|---|
+| `Recover` | read on through damaged markup, counting each repair in `Stats.Repairs`: mismatched end tags, elements left open, a stray `<` or `&`, attributes without quotes or values, markup cut off at the end; elements deeper than `MaxDepth` read as part of their ancestor |
+| `Markup` | comments, processing instructions and the document type declaration as tokens |
+| `Spans` | each token's offsets in the input (`Span`) |
+| `Resolve`, `ExpansionLimit`, `MaxEntityDepth` | general entities expanded, within bounds |
+| `Decoded` | the input is UTF-8 already, whatever its declaration says |
+| `Bindings` | namespace declarations in scope before the first element (a part of a Flat OPC document) |
+| `MaxAttrs`, `MaxValueBytes`, `MaxTokenBytes`, `MaxDepth` | bounds; names of open elements keep `MaxNameKept` bytes |
+
+Attributes are read by namespace number (`Attr`, `AttrAt`) or by URI (`AttrURI`, `AttrURIAt`). Windows are pooled: `Release` hands one back, `Reset` and `ResetBytes` reuse a scanner. The tests of all three scanners it came from pass, and so does the comparison with `encoding/xml` over the XML parts of the development corpus's zip packages (`TestAgainstEncodingXML`, where `encoding/xml` reads a part). Measured in instructions, against go-fast-ooxml's scanner on the reads of its own benchmarks: 2 to 4.5 percent more on its large generated documents, 1 to 2 percent more on a batch of corpus files (a third of the Office and OpenDocument files); against go-fast-xml's on its corpus, with `Recover`, `Markup` and `Spans`, 13 percent fewer.
+
 ## Schema evolution
 
 `schema_version` changes when a field is removed or its meaning changes. Additions do not change it, including new block kinds: a decoder that meets a kind, part kind, origin or severity it does not know maps it to that enum's `Unknown` value, and unknown style names are ignored. An unknown block renders as a paragraph. Re-encoding such a document writes `"unknown"`, so the original name is lost. `Validate` rejects `Unknown`, since extractors must never emit it.
