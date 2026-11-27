@@ -88,3 +88,14 @@ go-fast-ooxml:
   Unicode Standard, and to make copies of this file in any form for
   internal or external distribution as long as this notice remains
   attached.
+
+--------------------------------------------------------------------------------
+
+entity/entities.txt
+  The named character references of the WHATWG HTML Living Standard,
+  section 13.5 "Named character references", whose machine-readable form
+  is https://html.spec.whatwg.org/entities.json. The HTML Standard is
+  (c) WHATWG (Apple, Google, Mozilla, Microsoft) and licensed under the
+  Creative Commons Attribution 4.0 International License. Moved here from
+  go-fast-html and go-fast-xml; entity/gen.go regenerates it from
+  entities.json.
