@@ -2,6 +2,25 @@
 
 The module version is the Go module's tag. The schema version is the `schema_version` every document carries; it changes only when a field is removed or its meaning changes (README, "Schema evolution").
 
+## v0.1.16 (schema 0.2)
+
+- **`envelope`, a new shared package:** what protects an encrypted
+  package in its compound-file envelope (`Detect`: rights management, a
+  password or certificates, or not stated) and one wording for each
+  (`Message`, with the subject the library names: "Office document",
+  "package"). go-fast-ooxml, go-fast-pdf and go-fast-msbin each had
+  this test. It knows the envelope the .NET packaging classes write
+  around an XPS document under rights management (licences in streams
+  named `EUL-...`), which go-fast-pdf found and go-fast-ooxml's test
+  missed. The password case says "with a password or for the owners of
+  certificates", since [MS-OFFCRYPTO] allows either.
+- **`opc`: `Package.Refund`** gives bytes back to the decompression
+  budget, for a reader that counts them against a budget of its own
+  (go-fast-pdf counts each page of an XPS document in page order). It
+  was done with a negative `Charge`, which worked by how `Charge` is
+  written, not by what it says.
+- `cfbtest`'s package comment named it `msbintest`.
+
 ## v0.1.15 (schema 0.2)
 
 - **`vba.ReadBytes` reports a damaged file even when the project cannot

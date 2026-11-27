@@ -1,6 +1,6 @@
-// Package msbintest is the test harness of go-fast-msbin: it builds the
-// files the library reads, so that each behaviour has a small file with
-// exactly known content.
+// Package cfbtest builds compound files for tests, so that each behaviour
+// of a reader of them has a small file with exactly known content. It was
+// go-fast-msbin's test harness.
 package cfbtest
 
 import (
