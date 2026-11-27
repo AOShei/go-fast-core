@@ -16,6 +16,8 @@ The module version is the Go module's tag. The schema version is the `schema_ver
   beside go-fast-ooxml's interface; `opc` reads interleaved parts, which
   XPS uses, and opens a zip without a content-types table for the caller
   to judge (`Typed`); `label` has `Alpha`.
+- **CI:** `xmlscan`'s worst-case timing test is skipped under the race
+  detector, where it took the macOS job past its ten minutes.
 
 ## v0.1.11 (schema 0.2)
 

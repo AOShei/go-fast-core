@@ -17,6 +17,9 @@ import (
 // a full-size read under 20 ms passes whatever its ratio, as times that
 // short are mostly noise.
 func TestWorstCaseInputsAreLinear(t *testing.T) {
+	if raceDetector {
+		t.Skip("timings under the race detector mean nothing, and it took ten minutes on macOS")
+	}
 	const size = 4 << 20
 	full, quarter := worstCases(size), worstCases(size/4)
 	read := func(name, in, way string) time.Duration {
