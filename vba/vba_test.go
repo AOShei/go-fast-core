@@ -92,6 +92,21 @@ func TestFileDamaged(t *testing.T) {
 	}
 }
 
+// A project that names UTF-16 as its code page is not read in pairs:
+// its source is bytes, the ASCII kept and the rest U+FFFD and counted.
+func TestUTF16CodePageIsNotDecoded(t *testing.T) {
+	for _, cp := range []int{1200, 1201} {
+		data := vbatest.VBAProject(cp, vbatest.VBAModule{Name: "M", Code: "Sub A()\r\n' \xe9\r\nEnd Sub\r\n"})
+		p, err := read(data, 1<<20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.CodePage != cp || p.Undecoded != 1 || len(p.Modules) != 1 || p.Modules[0].Code != "Sub A()\n' \uFFFD\nEnd Sub\n" {
+			t.Errorf("%d: %+v", cp, p)
+		}
+	}
+}
+
 func TestProject(t *testing.T) {
 	data := vbatest.VBAProject(1252,
 		vbatest.VBAModule{Name: "Module1", Code: "Attribute VB_Name = \"Module1\"\r\nSub Hello()\r\n    MsgBox \"Caf\xe9 \x80\"\r\nEnd Sub\r\n"},

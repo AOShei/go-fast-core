@@ -238,7 +238,14 @@ func (p *Project) parseDir(dir []byte) (mods []module, damaged bool) {
 
 // decode turns text in the project's code page into UTF-8.
 func (p *Project) decode(b []byte) string {
-	text, undecoded := charset.DecodeCodePage(p.CodePage, b)
+	cp := p.CodePage
+	if cp == 1200 || cp == 1201 {
+		// Source is bytes in a code page ([MS-OVBA] PROJECTCODEPAGE);
+		// UTF-16 is not one. Not decoded, as before the copies merged:
+		// the ASCII kept, the rest U+FFFD and counted.
+		cp = 0
+	}
+	text, undecoded := charset.DecodeCodePage(cp, b)
 	p.Undecoded += undecoded
 	return text
 }
