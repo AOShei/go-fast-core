@@ -2,6 +2,14 @@
 
 The module version is the Go module's tag. The schema version is the `schema_version` every document carries; it changes only when a field is removed or its meaning changes (README, "Schema evolution").
 
+## v0.1.13 (schema 0.2)
+
+- **Two more shared readers** (README, "Shared readers"): `rfc822`, the
+  reading of Internet messages and MIME that go-fast-email had and
+  go-fast-html had a copy of for MHTML, with email's reading of character
+  sets; and `entity`, the HTML character references go-fast-html and
+  go-fast-xml each had.
+
 ## v0.1.12 (schema 0.2)
 
 - **Shared readers.** Nine packages that libraries each kept a copy of

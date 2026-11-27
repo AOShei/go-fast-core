@@ -86,6 +86,9 @@ jobs:
           - ./xmlscan FuzzXMLScanner
           - ./cfb FuzzCFB
           - ./vba FuzzProject
+          - ./rfc822 FuzzHeader
+          - ./rfc822 FuzzBody
+          - ./rfc822 FuzzMIME
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
