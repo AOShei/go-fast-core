@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"testing/iotest"
+	"unicode/utf8"
 )
 
 // The tests from go-fast-xml, whose scanner always recovered, made every
@@ -362,6 +363,18 @@ func FuzzXMLScanner(f *testing.F) {
 		}
 		if whole.Stats.Expanded > 1<<12 {
 			t.Fatalf("expanded %d", whole.Stats.Expanded)
+		}
+		// Text and attribute values are valid UTF-8, whatever the input.
+		v := xNewBytes(data, opts(0))
+		for k := v.Next(); k != EOF; k = v.Next() {
+			if k >= Text && !utf8.Valid(v.Text()) {
+				t.Fatalf("text not UTF-8: %q", v.Text())
+			}
+			for i := 0; k == Start && i < v.NumAttr(); i++ {
+				if _, _, val := v.AttrAt(i); !utf8.Valid(val) {
+					t.Fatalf("attribute not UTF-8: %q", val)
+				}
+			}
 		}
 	})
 }

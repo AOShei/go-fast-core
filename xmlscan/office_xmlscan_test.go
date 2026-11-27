@@ -553,6 +553,36 @@ func TestCharRefsReplacedAreCounted(t *testing.T) {
 	}
 }
 
+// Text and attribute values are valid UTF-8 whatever the input: a byte
+// that is not part of a character is U+FFFD, counted in InvalidUTF8.
+// Valid text beyond ASCII is handed on as it is.
+func TestInvalidUTF8IsReplaced(t *testing.T) {
+	in := "<a x=\"caf\xe9\" y=\"\xff&amp;\" z=\"d\u00e9j\u00e0\">t\xe9xt <![CDATA[c\xc3]]> \u00e9t\u00e9 &amp;\x80</a>"
+	s := NewBytes([]byte(in), nil)
+	var text []byte
+	for k := s.Next(); k != EOF; k = s.Next() {
+		switch k {
+		case Start:
+			for range 2 { // read twice: replaced and counted once
+				x, _ := s.Attr(NoSpace, "x")
+				y, _ := s.Attr(NoSpace, "y")
+				z, _ := s.Attr(NoSpace, "z")
+				if string(x) != "caf\uFFFD" || string(y) != "\uFFFD&" || string(z) != "d\u00e9j\u00e0" {
+					t.Errorf("attributes %q %q %q", x, y, z)
+				}
+			}
+		case Text:
+			text = append(text, s.Text()...)
+		}
+	}
+	if s.Err() != nil || string(text) != "t\uFFFDxt c\uFFFD \u00e9t\u00e9 &\uFFFD" {
+		t.Errorf("err %v, text %q", s.Err(), text)
+	}
+	if s.Stats.InvalidUTF8 != 5 {
+		t.Errorf("InvalidUTF8 %d, want 5", s.Stats.InvalidUTF8)
+	}
+}
+
 func TestResetReusesBuffers(t *testing.T) {
 	s := NewBytes([]byte(`<a><b>&amp;</b></a>`), nil)
 	first, _ := dump(s)

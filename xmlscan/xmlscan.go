@@ -44,6 +44,8 @@ import (
 	"math"
 	"sync"
 	"unicode/utf8"
+
+	"github.com/AOShei/go-fast-core/charset"
 )
 
 // Kind is the type of a token.
@@ -251,6 +253,10 @@ type Stats struct {
 	// allows anywhere (&#0;, a surrogate, a number past U+10FFFF), each
 	// read as U+FFFD. Each is counted in Repairs too.
 	CharRefsReplaced int
+	// InvalidUTF8 counts the bytes of text and of attribute values read
+	// that are not part of a UTF-8 character, each read as U+FFFD (input
+	// that is UTF-8 is handed on as it is, and need not be valid).
+	InvalidUTF8 int
 }
 
 // attr is an attribute of the current start tag, by its offsets in
@@ -401,6 +407,9 @@ type Scanner struct {
 	gen        uint64   // changes whenever the bindings in scope change
 	scratch    []byte   // decoded text of the current token
 	attrBuf    []byte   // decoded attribute values of the current token
+	fixed      []byte   // the text of the current token, made valid UTF-8 (validText)
+	ascii      bool     // the text of the token being read is known to be ASCII
+	fixValue   []byte   // an attribute value made valid UTF-8, before it is copied to attrBuf
 	attrNested [][]byte // entities being expanded in an attribute value
 	endURI     []byte
 	endSpace   Space
@@ -665,7 +674,9 @@ func (s *Scanner) uriOf(b int32) []byte {
 
 // Text returns the content of the current Text, Comment, PI or Doctype
 // token. Text has references decoded; all have line ends normalized to
-// "\n", except Doctype, which is as written.
+// "\n", except Doctype, which is as written. It is valid UTF-8: a byte of
+// the input that is not part of a character is U+FFFD, counted in
+// Stats.InvalidUTF8.
 func (s *Scanner) Text() []byte { return s.text }
 
 // Target returns the target of the current PI token.
@@ -828,6 +839,7 @@ func (s *Scanner) Next() Kind {
 			return EOF
 		}
 		var status scanStatus
+		s.ascii = false // set by decodeText for the token it reads
 		switch {
 		case s.mode == modeComment:
 			status = s.comment()
@@ -840,6 +852,9 @@ func (s *Scanner) Next() Kind {
 		}
 		switch status {
 		case emitted:
+			if s.kind >= Text && !s.ascii {
+				s.text = s.validText(s.text)
+			}
 			return s.kind
 		case failed:
 			return EOF
@@ -855,7 +870,7 @@ func (s *Scanner) Next() Kind {
 					if !s.repair("unexpected end of input") {
 						return EOF
 					}
-					s.text = s.decodeLiteral(s.buf[s.pos:s.end])
+					s.text = s.validText(s.decodeLiteral(s.buf[s.pos:s.end]))
 					s.tokStart = s.here()
 					s.pos = s.end
 					s.tokEnd = s.hereEnd()
@@ -2159,8 +2174,8 @@ func (s *Scanner) attrPrefix(a *attr) []byte {
 
 // Attr returns the value of the attribute with the given namespace and
 // local name on the current Start token. An attribute written without a
-// prefix has namespace NoSpace. The value has references decoded and is
-// valid until the next call to Next.
+// prefix has namespace NoSpace. The value has references decoded, is
+// valid UTF-8 as Text is, and is good until the next call to Next.
 func (s *Scanner) Attr(space Space, local string) ([]byte, bool) {
 	for i := range s.attrs {
 		a := &s.attrs[i]
@@ -2271,18 +2286,30 @@ func (s *Scanner) attrValue(i int) []byte {
 // decodeValue returns the decoded form of a raw attribute value, cut to
 // the bounds and counted when it passes them.
 func (s *Scanner) decodeValue(raw []byte) []byte {
-	if !needsAttrDecode(raw) {
-		if len(raw) > s.maxValue {
-			s.Stats.ValuesCut++
-			return raw[:runeCut(raw, s.maxValue)]
+	if bytes.IndexByte(raw, '&') < 0 && !hasAttrSpace(raw) {
+		// Nothing to decode: bytes beyond ASCII, which must be UTF-8.
+		v := raw
+		if !charset.ValidUTF8(v) {
+			start := len(s.attrBuf)
+			s.attrBuf = s.appendValid(s.attrBuf, v)
+			v = s.attrBuf[start:]
 		}
-		return raw
+		if len(v) > s.maxValue {
+			s.Stats.ValuesCut++
+			v = v[:runeCut(v, s.maxValue)]
+		}
+		return v
 	}
 	room := min(s.maxValue, max(s.maxToken-len(s.attrBuf), 0))
 	start := len(s.attrBuf)
 	s.valueEnd, s.valueFull = start+room, false
 	s.attrBuf = s.decodeAttr(s.attrBuf, raw)
 	v := s.attrBuf[start:]
+	if !charset.ValidUTF8(v) {
+		s.fixValue = s.appendValid(s.fixValue[:0], v)
+		s.attrBuf = append(s.attrBuf[:start], s.fixValue...)
+		v = s.attrBuf[start:]
+	}
 	if s.valueFull || len(v) > room {
 		s.Stats.ValuesCut++
 		v = v[:runeCut(v, room)]
@@ -2306,25 +2333,64 @@ func runeCut(b []byte, n int) int {
 	return n
 }
 
-// needsAttrDecode reports whether a value holds '&' or a byte below 0x0E
-// (tab, line feed and carriage return become spaces), looking at eight
-// bytes at a time.
+// needsAttrDecode reports whether a value holds '&', a byte below 0x0E
+// (tab, line feed and carriage return become spaces) or a byte beyond
+// ASCII (UTF-8, to be checked), looking at eight bytes at a time. A value
+// of printable ASCII is used as it stands.
 func needsAttrDecode(v []byte) bool {
 	const ones, highs = 0x0101010101010101, 0x8080808080808080
 	for len(v) >= 8 {
 		x := binary.LittleEndian.Uint64(v)
 		y := x ^ (0x26 * ones) // '&' becomes zero
-		if ((y-ones)&^y|(x-0x0E*ones)&^x)&highs != 0 {
+		if ((y-ones)&^y|(x-0x0E*ones)&^x|x)&highs != 0 {
 			break
 		}
 		v = v[8:]
 	}
 	for _, c := range v {
-		if c == '&' || c == '\t' || c == '\n' || c == '\r' {
+		if c == '&' || c == '\t' || c == '\n' || c == '\r' || c >= 0x80 {
 			return true
 		}
 	}
 	return false
+}
+
+// hasAttrSpace reports whether a value holds a tab, a line feed or a
+// carriage return, which become spaces.
+func hasAttrSpace(v []byte) bool {
+	for _, c := range v {
+		if c == '\t' || c == '\n' || c == '\r' {
+			return true
+		}
+	}
+	return false
+}
+
+// validText returns t, or, when t is not valid UTF-8, a copy in which
+// each byte that is not part of a character is U+FFFD.
+func (s *Scanner) validText(t []byte) []byte {
+	if charset.ValidUTF8(t) {
+		return t
+	}
+	s.fixed = s.appendValid(s.fixed[:0], t)
+	return s.fixed
+}
+
+// appendValid appends b to dst with each byte that is not part of a UTF-8
+// character replaced by U+FFFD, and counts those bytes in
+// Stats.InvalidUTF8.
+func (s *Scanner) appendValid(dst, b []byte) []byte {
+	for len(b) > 0 {
+		r, n := utf8.DecodeRune(b)
+		if r == utf8.RuneError && n == 1 {
+			dst = utf8.AppendRune(dst, utf8.RuneError)
+			s.Stats.InvalidUTF8++
+		} else {
+			dst = append(dst, b[:n]...)
+		}
+		b = b[n:]
+	}
+	return dst
 }
 
 // decodeAttr appends the decoded form of raw to buf. White space
@@ -2402,15 +2468,18 @@ func (s *Scanner) expandAttr(buf, ref, name, repl []byte) []byte {
 func (s *Scanner) decodeText(raw []byte) ([]byte, int) {
 	if len(raw) <= 32 {
 		// Short text, the usual case in a spreadsheet: one look by hand
-		// is cheaper than two calls.
-		plain := true
+		// is cheaper than two calls. It also finds text that is ASCII,
+		// which Next need not check for UTF-8.
+		plain, high := true, byte(0)
 		for _, c := range raw {
 			if c == '&' || c == '\r' {
 				plain = false
 				break
 			}
+			high |= c
 		}
 		if plain {
+			s.ascii = high < 0x80
 			return raw, len(raw)
 		}
 	}
