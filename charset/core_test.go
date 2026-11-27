@@ -265,3 +265,16 @@ func TestDecodeCodePage(t *testing.T) {
 		t.Errorf("code page change: %q", string(got))
 	}
 }
+
+// The table PageDecoder reads windows-1252 by gives what win1252 gives.
+func TestCP1252TableIsWin1252(t *testing.T) {
+	for b := 0x80; b <= 0xFF; b++ {
+		r := rune(cp1252[b-0x80])
+		if r == 0 && b < 0xA0 {
+			r = rune(b)
+		}
+		if r != win1252(byte(b)) {
+			t.Errorf("0x%X: %U, win1252 %U", b, r, win1252(byte(b)))
+		}
+	}
+}

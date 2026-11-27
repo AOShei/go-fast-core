@@ -99,19 +99,47 @@ func ForCharset(charset int) int {
 // character. Bytes above 0x7F in a code page not decoded here are not
 // characters either, but for the Symbol character set's bullet (0xB7).
 type PageDecoder struct {
-	d     Decoder
-	cp    int
-	known bool
-	set   bool
+	d      Decoder
+	cp     int
+	known  bool
+	set    bool
+	single *[128]uint16 // the code page's table, if it is a single-byte one
 }
 
 // Byte decodes byte b of code page cp: see Decoder.Byte.
 func (p *PageDecoder) Byte(cp int, b byte, emit func(r rune, ok bool)) {
+	if p.set && cp == p.cp && p.known && p.d.n == 0 {
+		// The usual cases, in the code page of the byte before: as
+		// Decoder.Byte has them, without the call.
+		if b < 0x80 && byteWise(p.d.enc) {
+			emit(rune(b), true)
+			return
+		}
+		if t := p.single; t != nil {
+			switch r := t[b-0x80]; {
+			case r != 0:
+				emit(rune(r), true)
+			case b < 0xA0:
+				emit(rune(b), true)
+			default:
+				emit(0xFFFD, false)
+			}
+			return
+		}
+	}
 	if !p.set || cp != p.cp {
 		p.Flush(emit)
 		enc, ok := CodePage(cp)
 		p.cp, p.known, p.set = cp, ok, true
 		p.d.Reset(enc)
+		p.single = nil
+		if ok {
+			if enc == Windows1252 {
+				p.single = &cp1252 // its undefined bytes are the C1 controls win1252 gives them
+			} else {
+				p.single = enc.single()
+			}
+		}
 	}
 	switch {
 	case p.known:

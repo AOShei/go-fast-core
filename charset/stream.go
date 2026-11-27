@@ -78,6 +78,29 @@ func (d *Decoder) Step(src []byte, s int) (dec, n int) {
 // with ok false for a U+FFFD that stands for bytes that are not a
 // character.
 func (d *Decoder) Byte(b byte, emit func(r rune, ok bool)) {
+	if d.n == 0 {
+		// The usual cases, with no character half read: ASCII, and a
+		// byte of a single-byte encoding.
+		switch {
+		case b < 0x80 && byteWise(d.enc):
+			emit(rune(b), true)
+			return
+		case d.enc == Windows1252:
+			emit(win1252(b), true)
+			return
+		}
+		if t := d.enc.single(); t != nil {
+			switch r := t[b-0x80]; {
+			case r != 0:
+				emit(rune(r), true)
+			case b < 0xA0:
+				emit(rune(b), true) // undefined: the C1 control, as decodeAt has it
+			default:
+				emit(utf8.RuneError, false)
+			}
+			return
+		}
+	}
 	d.pend[d.n] = b
 	d.n++
 	d.drain(false, emit)
