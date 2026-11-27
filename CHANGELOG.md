@@ -2,6 +2,21 @@
 
 The module version is the Go module's tag. The schema version is the `schema_version` every document carries; it changes only when a field is removed or its meaning changes (README, "Schema evolution").
 
+## v0.1.12 (schema 0.2)
+
+- **Shared readers.** Nine packages that libraries each kept a copy of
+  are here once (README, "Shared readers"): `charset`, `xmlscan`, `opc`,
+  `cfb` (with `cfbtest`), `clean`, `symbol`, `label`, `hidden` and `vba`
+  (with `vbatest`). Each keeps every fix its copies had. The libraries
+  move to them in their own releases; nothing in the root package
+  changes.
+- **New in them:** `charset` decodes ISO-2022-JP and gives GBK byte 0x80
+  as the euro sign; `xmlscan` has go-fast-xml's features as options
+  (`Recover`, `Markup`, `Spans`, entity expansion, attributes by URI)
+  beside go-fast-ooxml's interface; `opc` reads interleaved parts, which
+  XPS uses, and opens a zip without a content-types table for the caller
+  to judge (`Typed`); `label` has `Alpha`.
+
 ## v0.1.11 (schema 0.2)
 
 - **A continued block is joined past footnotes.** `Block.Continued`
