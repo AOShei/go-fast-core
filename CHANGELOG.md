@@ -2,6 +2,32 @@
 
 The module version is the Go module's tag. The schema version is the `schema_version` every document carries; it changes only when a field is removed or its meaning changes (README, "Schema evolution").
 
+## v0.1.18 (schema 0.2)
+
+- **`xmlscan`: names are valid UTF-8 too:** an element's (`Name`,
+  `Local`, at its Start and its End), an attribute's (`AttrNameAt`, and
+  the local name `AttrAt` and `AttrURIAt` give) and a processing
+  instruction's target. A byte that is not part of a character is U+FFFD,
+  counted in `Stats.InvalidUTF8` once (an element's at its Start). An end
+  tag matches its start tag by the name so mended; a prefix is bound by
+  its bytes as written. With v0.1.17's text and attribute values, all the
+  scanner hands out is valid UTF-8, and the libraries need no check of
+  their own (go-fast-xml kept one on names, which its fuzzing showed was
+  needed).
+  - **Cost:** a start tag whose names are ASCII pays a test at the end of
+    each name (bytes beyond ASCII are marked in the table the name loops
+    look up, and noted), a flag cleared and tested; End tokens pay
+    nothing. This release measured in instructions against v0.1.17, one
+    thread: +0.87 % on go-fast-ooxml's 788 corpus files (many small
+    tags), +0.19 % on go-fast-xml's 9,335 dev files.
+- **`charset.CutUTF8(s, n)`** cuts a string or a byte slice to at most `n`
+  bytes without splitting a UTF-8 character (moving back at most three
+  bytes), and neither trims nor mends: the cut that `xmlscan`, `clean`,
+  go-fast-html, go-fast-xml and go-fast-ooxml each wrote for themselves.
+  `xmlscan`'s attribute values and `clean`'s bounded labels use it; the
+  cut of an element name keeps a copy written out, since a call there
+  costs every tag.
+
 ## v0.1.17 (schema 0.2)
 
 - **`xmlscan`: text and attribute values are valid UTF-8,** whatever the

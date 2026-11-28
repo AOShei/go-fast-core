@@ -44,3 +44,54 @@ func TestValidUTF8(t *testing.T) {
 		check(b)
 	}
 }
+
+// CutUTF8 cuts valid UTF-8 where a character starts, as walking back to
+// the start of the character does, and any input to a prefix of at most n
+// bytes and at least n-3; a string and a byte slice alike.
+func TestCutUTF8(t *testing.T) {
+	ref := func(b []byte, n int) []byte {
+		for n > 0 && !utf8.RuneStart(b[n]) {
+			n--
+		}
+		return b[:n]
+	}
+	check := func(b []byte, n int) {
+		t.Helper()
+		got := CutUTF8(b, n)
+		if s := CutUTF8(string(b), n); s != string(got) {
+			t.Fatalf("CutUTF8(%q, %d): string %q, bytes %q", b, n, s, got)
+		}
+		want := max(n, 0)
+		if want >= len(b) {
+			if string(got) != string(b) {
+				t.Fatalf("CutUTF8(%q, %d) = %q, want it whole", b, n, got)
+			}
+			return
+		}
+		if utf8.Valid(b) {
+			if r := ref(b, want); string(got) != string(r) {
+				t.Fatalf("CutUTF8(%q, %d) = %q, want %q", b, n, got, r)
+			}
+		}
+		if len(got) > want || len(got) < want-3 || string(b[:len(got)]) != string(got) {
+			t.Fatalf("CutUTF8(%q, %d) = %q", b, n, got)
+		}
+	}
+	for _, c := range []string{"", "abc", "caf\u00e9", "\u6f22\u5b57", "\U0001F600x", "\xff\x80\x80\x80\x80", "a\xc3", "\xe2\x82"} {
+		for n := -1; n <= len(c)+1; n++ {
+			check([]byte(c), n)
+		}
+	}
+	const pool = "ab\x80\xbf\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80\xff"
+	r := rand.New(rand.NewPCG(5, 6))
+	for range 50000 {
+		b := make([]byte, r.IntN(16))
+		for i := range b {
+			b[i] = pool[r.IntN(len(pool))]
+		}
+		check(b, r.IntN(18)-1)
+	}
+	if n := testing.AllocsPerRun(100, func() { _ = CutUTF8("caf\u00e9 au lait", 4) }); n != 0 {
+		t.Errorf("%v allocations", n)
+	}
+}
