@@ -18,7 +18,6 @@ import (
 	"encoding/binary"
 	"strings"
 	"unicode"
-	"unicode/utf8"
 
 	"github.com/AOShei/go-fast-core"
 	"github.com/AOShei/go-fast-core/charset"
@@ -211,12 +210,7 @@ func bounded(s string, limit int) string {
 		return strings.TrimSpace(s)
 	}
 	if len(s) > limit {
-		// Cut where a character starts, so that none is split.
-		n := limit
-		for n > 0 && n > limit-utf8.UTFMax && !utf8.RuneStart(s[n]) {
-			n--
-		}
-		s = s[:n]
+		s = charset.CutUTF8(s, limit) // so that no character is split
 	}
 	out, _ := String([]byte(s), Trim)
 	return strings.Join(strings.Fields(out), " ")

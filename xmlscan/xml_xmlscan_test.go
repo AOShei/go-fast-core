@@ -364,15 +364,23 @@ func FuzzXMLScanner(f *testing.F) {
 		if whole.Stats.Expanded > 1<<12 {
 			t.Fatalf("expanded %d", whole.Stats.Expanded)
 		}
-		// Text and attribute values are valid UTF-8, whatever the input.
+		// Text, attribute values and names are valid UTF-8, whatever the
+		// input.
 		v := xNewBytes(data, opts(0))
 		for k := v.Next(); k != EOF; k = v.Next() {
 			if k >= Text && !utf8.Valid(v.Text()) {
 				t.Fatalf("text not UTF-8: %q", v.Text())
 			}
+			if (k == Start || k == End) && (!utf8.Valid(v.Name()) || !utf8.Valid(v.Local())) {
+				t.Fatalf("name not UTF-8: %q", v.Name())
+			}
+			if k == PI && !utf8.Valid(v.Target()) {
+				t.Fatalf("target not UTF-8: %q", v.Target())
+			}
 			for i := 0; k == Start && i < v.NumAttr(); i++ {
-				if _, _, val := v.AttrAt(i); !utf8.Valid(val) {
-					t.Fatalf("attribute not UTF-8: %q", val)
+				_, local, val := v.AttrAt(i)
+				if !utf8.Valid(val) || !utf8.Valid(local) || !utf8.Valid(v.AttrNameAt(i)) {
+					t.Fatalf("attribute not UTF-8: %q %q", v.AttrNameAt(i), val)
 				}
 			}
 		}

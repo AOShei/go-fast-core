@@ -94,3 +94,39 @@ func ValidUTF8(b []byte) bool {
 	}
 	return true
 }
+
+// CutUTF8 returns s cut to at most n bytes without splitting a UTF-8
+// character: when the cut falls inside one, it moves back to where the
+// character starts, at most three bytes. It neither trims nor mends
+// anything else, and bytes that are not part of a character may be cut
+// anywhere. n below 0 is taken as 0.
+func CutUTF8[T string | []byte](s T, n int) T {
+	if n >= len(s) {
+		return s
+	}
+	if n <= 0 {
+		return s[:0]
+	}
+	if s[n]&0xC0 != 0x80 {
+		return s[:n] // the cut is where a character starts
+	}
+	for i := n - 1; i >= 0 && i >= n-3; i-- {
+		c := s[i]
+		if c < 0x80 {
+			break
+		}
+		if c >= 0xC0 {
+			size := 2
+			if c >= 0xF0 {
+				size = 4
+			} else if c >= 0xE0 {
+				size = 3
+			}
+			if i+size > n {
+				return s[:i]
+			}
+			break
+		}
+	}
+	return s[:n]
+}

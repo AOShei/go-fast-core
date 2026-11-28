@@ -583,6 +583,53 @@ func TestInvalidUTF8IsReplaced(t *testing.T) {
 	}
 }
 
+// Names are valid UTF-8 too: an element's, at its Start and its End, an
+// attribute's, and a processing instruction's target. Each byte mended is
+// counted once, and end tags still match their start tags by the bytes as
+// written.
+func TestInvalidUTF8InNames(t *testing.T) {
+	in := "<?t\xffx d?><p:r\xe9 xmlns:p=\"u\" a\xff:b\xfe=\"1\" c=\"2\"><n\u00e9/><p:r\xe9/></p:r\xe9>"
+	for _, recover := range []bool{false, true} {
+		s := NewBytes([]byte(in), &Options{Recover: recover, Markup: true})
+		var got []string
+		for k := s.Next(); k != EOF; k = s.Next() {
+			switch k {
+			case PI:
+				got = append(got, "?"+string(s.Target()))
+			case Start:
+				got = append(got, "<"+string(s.Name())+"|"+string(s.Local()))
+				for i := 0; i < s.NumAttr(); i++ {
+					_, local, _ := s.AttrAt(i)
+					_, ulocal, _ := s.AttrURIAt(i)
+					got = append(got, string(s.AttrNameAt(i))+"|"+string(local)+"|"+string(ulocal))
+				}
+			case End:
+				got = append(got, "/"+string(s.Name())+"|"+string(s.Local()))
+			}
+		}
+		want := "?t\uFFFDx <p:r\uFFFD|r\uFFFD xmlns:p|p|p a\uFFFD:b\uFFFD|b\uFFFD|b\uFFFD c|c|c " +
+			"<n\u00e9|n\u00e9 /n\u00e9|n\u00e9 <p:r\uFFFD|r\uFFFD /p:r\uFFFD|r\uFFFD /p:r\uFFFD|r\uFFFD"
+		if s.Err() != nil || strings.Join(got, " ") != want {
+			t.Errorf("recover %v: err %v\n%q\nwant\n%q", recover, s.Err(), strings.Join(got, " "), want)
+		}
+		// t\xffx, the outer r\xe9, a\xff:b\xfe and the inner r\xe9.
+		if s.Stats.InvalidUTF8 != 5 || s.Stats.Repairs != 0 {
+			t.Errorf("recover %v: InvalidUTF8 %d, want 5; repairs %d", recover, s.Stats.InvalidUTF8, s.Stats.Repairs)
+		}
+	}
+	// Names that differ only in bytes that are not UTF-8 match once
+	// mended, in strict reading too; an end tag written with a space is
+	// matched the same way.
+	s := NewBytes([]byte("<a\xff><b\xfe></b\xfe ></a\xfe>"), nil)
+	n := 0
+	for k := s.Next(); k != EOF; k = s.Next() {
+		n++
+	}
+	if s.Err() != nil || n != 4 || s.Stats.InvalidUTF8 != 2 {
+		t.Errorf("strict: %d tokens, err %v, InvalidUTF8 %d", n, s.Err(), s.Stats.InvalidUTF8)
+	}
+}
+
 func TestResetReusesBuffers(t *testing.T) {
 	s := NewBytes([]byte(`<a><b>&amp;</b></a>`), nil)
 	first, _ := dump(s)

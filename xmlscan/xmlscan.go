@@ -253,9 +253,11 @@ type Stats struct {
 	// allows anywhere (&#0;, a surrogate, a number past U+10FFFF), each
 	// read as U+FFFD. Each is counted in Repairs too.
 	CharRefsReplaced int
-	// InvalidUTF8 counts the bytes of text and of attribute values read
-	// that are not part of a UTF-8 character, each read as U+FFFD (input
-	// that is UTF-8 is handed on as it is, and need not be valid).
+	// InvalidUTF8 counts the bytes of text, attribute values and names
+	// read that are not part of a UTF-8 character, each read as U+FFFD
+	// (input that is UTF-8 is handed on as it is, and need not be valid).
+	// A name is counted once: an element's at its Start token, not again
+	// at its End.
 	InvalidUTF8 int
 }
 
@@ -410,6 +412,9 @@ type Scanner struct {
 	fixed      []byte   // the text of the current token, made valid UTF-8 (validText)
 	ascii      bool     // the text of the token being read is known to be ASCII
 	fixValue   []byte   // an attribute value made valid UTF-8, before it is copied to attrBuf
+	namesHigh  bool     // a name in the current start tag has a byte beyond ASCII
+	mendedName bool     // an element name of the document was not valid UTF-8 (endTag mends end tags to match)
+	attrFix    [][]byte // the attribute names made valid UTF-8, by index; nil for one that is
 	attrNested [][]byte // entities being expanded in an attribute value
 	endURI     []byte
 	endSpace   Space
@@ -531,6 +536,7 @@ func (s *Scanner) reset(opts *Options) {
 	s.qname, s.local, s.text, s.target, s.final = nil, nil, nil, nil, false
 	s.bind, s.space, s.tokStart, s.tokEnd = bindNone, NoSpace, 0, 0
 	s.stack, s.names, s.binds, s.bindNames = s.stack[:0], s.names[:0], s.binds[:0], s.bindNames[:0]
+	s.mendedName = false
 	s.gen++
 	if len(s.slots) > maxSlotsKept {
 		s.slots, s.heads, s.freeSlots = nil, s.heads[:0], s.freeSlots[:0] // do not carry a hostile file's prefixes around
@@ -633,7 +639,11 @@ func (s *Scanner) Kind() Kind { return s.kind }
 func (s *Scanner) Local() []byte { return s.local }
 
 // Name returns the qualified name of the current Start or End token as it
-// is written in the source, prefix included.
+// is written in the source, prefix included. It is valid UTF-8: a byte
+// that is not part of a character is U+FFFD, counted in Stats.InvalidUTF8
+// at the Start token. An end tag is matched to its start tag by the name
+// so mended, so two names that differ only in such bytes match; a prefix
+// is bound by its bytes as written.
 func (s *Scanner) Name() []byte { return s.qname }
 
 // Space returns the namespace of the current Start or End token.
@@ -679,7 +689,8 @@ func (s *Scanner) uriOf(b int32) []byte {
 // Stats.InvalidUTF8.
 func (s *Scanner) Text() []byte { return s.text }
 
-// Target returns the target of the current PI token.
+// Target returns the target of the current PI token, valid UTF-8 as Name
+// is.
 func (s *Scanner) Target() []byte { return s.target }
 
 // Final reports whether the current Comment token is the last piece of
@@ -1559,6 +1570,9 @@ func (s *Scanner) pi(b []byte) scanStatus {
 		t++
 	}
 	s.target = body[:t]
+	if !charset.ValidUTF8(s.target) {
+		s.target, _ = mendName(s.target, &s.Stats.InvalidUTF8)
+	}
 	data := body[t:]
 	for len(data) > 0 && isSpace(data[0]) {
 		data = data[1:]
@@ -1605,6 +1619,9 @@ func (s *Scanner) endTag(b []byte) scanStatus {
 			name = name[:j]
 			break
 		}
+	}
+	if s.mendedName && !charset.ValidUTF8(name) {
+		name, _ = mendName(name, nil) // as its start tag's was, counted there
 	}
 	if s.over > 0 {
 		// Inside elements read as part of their ancestor.
@@ -1659,14 +1676,19 @@ func clip(b []byte) []byte {
 	return b
 }
 
-// nameEnds marks the bytes that end a tag's name, and ':', which is noted
-// on the way; attrNameEnds the same for an attribute's name, which '='
-// also ends. One look-up a byte rather than a comparison for each.
+// nameEnds marks the bytes that end a tag's name, and ':' and the bytes
+// beyond ASCII, which are noted on the way; attrNameEnds the same for an
+// attribute's name, which '=' also ends. One look-up a byte rather than a
+// comparison for each: a name of ASCII, the usual case, pays nothing for
+// the UTF-8 check.
 var nameEnds, attrNameEnds = func() (n, a [256]bool) {
 	for _, c := range []byte(">/<: \n\t\r") {
 		n[c], a[c] = true, true
 	}
 	a['='] = true
+	for c := 0x80; c < 0x100; c++ {
+		n[c], a[c] = true, true // not an end: noted, for the UTF-8 check
+	}
 	return
 }()
 
@@ -1677,10 +1699,15 @@ func (s *Scanner) startTag(b []byte) scanStatus {
 		b = b[:maxTag]
 	}
 	i, colon := 1, -1
+	s.namesHigh = false
 	for ; i < len(b); i++ {
 		if c := b[i]; nameEnds[c] {
 			if c != ':' {
-				break
+				if c < 0x80 {
+					break
+				}
+				s.namesHigh = true // to be checked for UTF-8
+				continue
 			}
 			if colon < 0 {
 				colon = i - 1
@@ -1769,7 +1796,11 @@ func (s *Scanner) attrsStrict(b []byte, i int) (int, bool, bool, scanStatus) {
 		for ; i < len(b); i++ {
 			if c := b[i]; attrNameEnds[c] {
 				if c != ':' {
-					break
+					if c < 0x80 {
+						break
+					}
+					s.namesHigh = true // to be checked for UTF-8
+					continue
 				}
 				if acolon < 0 {
 					acolon = i - start
@@ -1871,7 +1902,11 @@ func (s *Scanner) attrsLenient(b []byte, i int) (int, bool, bool, scanStatus) {
 		for ; i < len(b); i++ {
 			if c := b[i]; attrNameEnds[c] {
 				if c != ':' {
-					break
+					if c < 0x80 {
+						break
+					}
+					s.namesHigh = true // to be checked for UTF-8
+					continue
 				}
 				if acolon < 0 {
 					acolon = i - start
@@ -1975,16 +2010,26 @@ var xmlnsPrefix = []byte("xmlns")
 // be "xmlns", the only way the tag can hold a namespace declaration.
 func (s *Scanner) push(name []byte, colon int, declares bool) {
 	s.started = true
-	kept := name
+	full, fcolon := name, colon
+	if s.namesHigh {
+		full, fcolon = s.fixNames(name, colon)
+	}
+	kept := full
 	if len(kept) > MaxNameKept {
-		kept = kept[:runeCut(kept, MaxNameKept)]
+		// Cut where a character starts, as charset.CutUTF8 does, written
+		// out: a call here costs every tag, cut or not.
+		n := MaxNameKept
+		for n > 0 && !utf8.RuneStart(kept[n]) {
+			n--
+		}
+		kept = kept[:n]
 		s.Stats.NamesCut++
 	}
 	e := elem{
 		nameStart: int32(len(s.names)),
 		nameLen:   int32(len(kept)),
-		fullLen:   int32(len(name)),
-		colon:     int32(colon),
+		fullLen:   int32(len(full)),
+		colon:     int32(fcolon),
 		bindMark:  int32(len(s.binds)),
 		bindBytes: int32(len(s.bindNames)),
 	}
@@ -2008,9 +2053,10 @@ func (s *Scanner) push(name []byte, colon int, declares bool) {
 		s.gen++
 	}
 
+	// The prefix as written: declarations bind prefixes as written.
 	var prefix []byte
-	if e.colon >= 0 {
-		prefix = name[:e.colon]
+	if colon >= 0 {
+		prefix = name[:colon]
 	}
 	// A child usually has its parent's prefix. If this tag declared
 	// nothing, the parent's answer is the answer.
@@ -2223,8 +2269,25 @@ func (s *Scanner) AttrAny(local string) ([]byte, bool) {
 func (s *Scanner) NumAttr() int { return len(s.attrs) }
 
 // AttrNameAt returns the qualified name of the i-th attribute of the
-// current Start token as written in the source, prefix included.
-func (s *Scanner) AttrNameAt(i int) []byte { return s.attrName(&s.attrs[i]) }
+// current Start token as written in the source, prefix included. It is
+// valid UTF-8 as Name is.
+func (s *Scanner) AttrNameAt(i int) []byte {
+	if s.namesHigh && i < len(s.attrFix) && s.attrFix[i] != nil {
+		return s.attrFix[i]
+	}
+	return s.attrName(&s.attrs[i])
+}
+
+// fixedLocal returns the local name of the i-th attribute made valid
+// UTF-8, or local when it is: for a start tag with a name beyond ASCII,
+// out of line so that the usual case costs a test.
+func (s *Scanner) fixedLocal(i int, local []byte) []byte {
+	if i < len(s.attrFix) && s.attrFix[i] != nil {
+		f := s.attrFix[i]
+		return f[bytes.IndexByte(f, ':')+1:]
+	}
+	return local
+}
 
 // AttrAt returns the i-th attribute of the current Start token: its
 // namespace, local name and decoded value. A namespace declaration's
@@ -2232,7 +2295,11 @@ func (s *Scanner) AttrNameAt(i int) []byte { return s.attrName(&s.attrs[i]) }
 // the default namespace's.
 func (s *Scanner) AttrAt(i int) (space Space, local, value []byte) {
 	a := &s.attrs[i]
-	return s.spaceOf(s.resolveBind(s.attrPrefix(a), false)), s.attrLocal(a), s.attrValue(i)
+	local = s.attrLocal(a)
+	if s.namesHigh {
+		local = s.fixedLocal(i, local)
+	}
+	return s.spaceOf(s.resolveBind(s.attrPrefix(a), false)), local, s.attrValue(i)
 }
 
 // AttrURIAt returns the i-th attribute of the current Start token: its
@@ -2240,7 +2307,11 @@ func (s *Scanner) AttrAt(i int) (space Space, local, value []byte) {
 // namespace declaration has the xmlns namespace.
 func (s *Scanner) AttrURIAt(i int) (uri, local, value []byte) {
 	a := &s.attrs[i]
-	return s.attrURI(a), s.attrLocal(a), s.attrValue(i)
+	local = s.attrLocal(a)
+	if s.namesHigh {
+		local = s.fixedLocal(i, local)
+	}
+	return s.attrURI(a), local, s.attrValue(i)
 }
 
 func (s *Scanner) attrURI(a *attr) []byte {
@@ -2296,7 +2367,7 @@ func (s *Scanner) decodeValue(raw []byte) []byte {
 		}
 		if len(v) > s.maxValue {
 			s.Stats.ValuesCut++
-			v = v[:runeCut(v, s.maxValue)]
+			v = charset.CutUTF8(v, s.maxValue)
 		}
 		return v
 	}
@@ -2312,25 +2383,13 @@ func (s *Scanner) decodeValue(raw []byte) []byte {
 	}
 	if s.valueFull || len(v) > room {
 		s.Stats.ValuesCut++
-		v = v[:runeCut(v, room)]
+		v = charset.CutUTF8(v, room)
 		s.attrBuf = s.attrBuf[:start+len(v)]
 	}
 	// A value that needed decoding may leave attrBuf's backing array when
 	// it grows; earlier values keep pointing at the old array, which stays
 	// valid, so they are unaffected.
 	return v
-}
-
-// runeCut returns the largest n <= max at which b can be cut without
-// splitting a UTF-8 sequence.
-func runeCut(b []byte, n int) int {
-	if n >= len(b) {
-		return len(b)
-	}
-	for n > 0 && !utf8.RuneStart(b[n]) {
-		n--
-	}
-	return n
 }
 
 // needsAttrDecode reports whether a value holds '&', a byte below 0x0E
@@ -2391,6 +2450,52 @@ func (s *Scanner) appendValid(dst, b []byte) []byte {
 		b = b[n:]
 	}
 	return dst
+}
+
+// mendName returns a copy of name with each byte that is not part of a
+// UTF-8 character replaced by U+FFFD, and its local part (after the
+// first ':'), adding the bytes replaced to *count when count is not nil.
+// It is for names, which are rarely not ASCII and more rarely not valid:
+// the copy is not kept for reuse, so a name handed out stays as it was.
+func mendName(name []byte, count *int) (qname, local []byte) {
+	n := 0
+	q := make([]byte, 0, len(name)+8)
+	for b := name; len(b) > 0; {
+		r, m := utf8.DecodeRune(b)
+		if r == utf8.RuneError && m == 1 {
+			q = utf8.AppendRune(q, utf8.RuneError)
+			n++
+		} else {
+			q = append(q, b[:m]...)
+		}
+		b = b[m:]
+	}
+	if count != nil {
+		*count += n
+	}
+	return q, q[bytes.IndexByte(q, ':')+1:]
+}
+
+// fixNames makes the names of the start tag being read valid UTF-8, those
+// that are not. It returns the element's name and the offset of its ':',
+// mended: kept so, the element has it at its Start and its End, and
+// endTag mends an end tag's name to match. Its attributes' names are kept
+// in attrFix.
+func (s *Scanner) fixNames(name []byte, colon int) ([]byte, int) {
+	if !charset.ValidUTF8(name) {
+		name, _ = mendName(name, &s.Stats.InvalidUTF8)
+		colon = bytes.IndexByte(name, ':')
+		s.mendedName = true
+	}
+	s.attrFix = s.attrFix[:0]
+	for i := range s.attrs {
+		var f []byte
+		if an := s.attrName(&s.attrs[i]); !charset.ValidUTF8(an) {
+			f, _ = mendName(an, &s.Stats.InvalidUTF8)
+		}
+		s.attrFix = append(s.attrFix, f)
+	}
+	return name, colon
 }
 
 // decodeAttr appends the decoded form of raw to buf. White space
